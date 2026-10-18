@@ -4,19 +4,19 @@ import { activeLayerOf, layerAnchors, anchorToLayerIndex } from "../../lib/playb
 import type { OpCatalogEntry } from "../../lib/types";
 
 test("activeLayerOf maps catalog entry ops to layer indices", () => {
-  const embedOp: OpCatalogEntry = {
+  const embedOp: any = {
     op_key: "embedding",
     name: "model.embed_tokens",
     shape: [151936, 896],
     layer: null,
   };
-  const layerOp: OpCatalogEntry = {
+  const layerOp: any = {
     op_key: "attention",
     name: "model.layers.5.self_attn",
     shape: [896, 896],
     layer: 5,
   };
-  const outputOp: OpCatalogEntry = {
+  const outputOp: any = {
     op_key: "output",
     name: "lm_head",
     shape: [896, 151936],
@@ -30,7 +30,7 @@ test("activeLayerOf maps catalog entry ops to layer indices", () => {
 });
 
 test("layerAnchors identifies execution op indices starting each active layer", () => {
-  const catalog: OpCatalogEntry[] = [
+  const catalog: any[] = [
     { op_key: "embedding", name: "embed", shape: [100, 10], layer: null },
     { op_key: "attention", name: "l0", shape: [10, 10], layer: 0 },
     { op_key: "mlp", name: "l0_mlp", shape: [10, 10], layer: 0 },
@@ -43,7 +43,7 @@ test("layerAnchors identifies execution op indices starting each active layer", 
 });
 
 test("anchorToLayerIndex maps anchor positions to transformer layer indices", () => {
-  const catalog: OpCatalogEntry[] = [
+  const catalog: any[] = [
     { op_key: "embedding", name: "embed", shape: [100, 10], layer: null },
     { op_key: "attention", name: "l0", shape: [10, 10], layer: 0 },
     { op_key: "mlp", name: "l0_mlp", shape: [10, 10], layer: 0 },
