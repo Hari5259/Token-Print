@@ -695,9 +695,17 @@ test("Phase 5.8d review fixes: HTML escaping, malformed timings, provenance, fon
   assert.equal(noEvidenceHtml.includes("● VERIFIED"), false, "Does not assert verified backend without evidence");
   assert.equal(noEvidenceHtml.includes("● ACTIVE"), false, "Does not assert active device without evidence");
 
-  // 9. Issue 9: Report does not contact Google Fonts
-  assert.equal(realTimingHtml.includes("fonts.googleapis.com"), false, "Does not contact fonts.googleapis.com");
-  assert.equal(realTimingHtml.includes("fonts.gstatic.com"), false, "Does not contact fonts.gstatic.com");
+  // 9. Issue 9: Report does not contact Google Fonts.
+  // Extract exact hosts instead of substring-matching, so a lookalike domain
+  // (e.g. fonts.googleapis.com.evil.example) cannot satisfy the assertion.
+  const externalHosts = new Set(
+    Array.from(
+      realTimingHtml.matchAll(/(?:https?:)?\/\/([^/\s"'<>]+)/gi),
+      (m) => (m[1] ?? "").toLowerCase()
+    )
+  );
+  assert.equal(externalHosts.has("fonts.googleapis.com"), false, "Does not contact fonts.googleapis.com");
+  assert.equal(externalHosts.has("fonts.gstatic.com"), false, "Does not contact fonts.gstatic.com");
 });
 
 

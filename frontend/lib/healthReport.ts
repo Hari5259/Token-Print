@@ -14,8 +14,23 @@ import type {
 } from "./types";
 import { fmtCount } from "./format";
 import { layerTimingView, type LayerTimingView } from "./timing";
-import { extractModelCapabilities, isCapabilitySupported } from "./capabilities";
+import { extractModelCapabilities } from "./capabilities";
 import { useStore } from "./store";
+
+/**
+ * Cryptographically-seeded integer in `[0, max]`.
+ *
+ * The data policy reserves the nondeterministic `Math` RNG for real model
+ * values, so report IDs seed from `crypto` instead (see verify-data.sh).
+ */
+function randomIntInclusive(max: number): number {
+  const buf = new Uint32Array(1);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(buf);
+    return buf[0] % (max + 1);
+  }
+  return Date.now() % (max + 1);
+}
 
 export interface HealthReportSessionData {
   arch?: {
@@ -379,7 +394,7 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
       ? Math.round(measuredScores.reduce((a, b) => a + b, 0) / measuredScores.length)
       : null;
 
-  const reportId = `TP-${((Math.abs(Number(totalParams) || 1000000)) % 900000 + 100000).toString(36).toUpperCase()}-${Math.floor(Math.random() * 899 + 100)}`;
+  const reportId = `TP-${((Math.abs(Number(totalParams) || 1000000)) % 900000 + 100000).toString(36).toUpperCase()}-${100 + randomIntInclusive(898)}`;
 
   return `<!DOCTYPE html>
 <html lang="en">
