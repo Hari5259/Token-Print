@@ -90,7 +90,6 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
   const kvHeads = dims?.num_kv_heads ?? m?.num_kv_heads;
   const contextLen = dims?.context_length ?? m?.context_length;
   const hiddenSize = dims?.hidden_size ?? m?.hidden_size ?? (trace && "hidden_size" in trace ? (trace as any).hidden_size : null);
-  const vocabSize = dims?.vocab_size ?? m?.vocab_size;
 
   // Determine provenance details and evidence
   const originBadge = provenance?.source_type || (genMeta?.source === "browser" ? "REAL" : "UNKNOWN");
