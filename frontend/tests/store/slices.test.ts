@@ -14,6 +14,7 @@ import { storeDefinition } from "../../lib/store/index";
 import { PRESET_PROMPTS, isByteFallbackToken } from "../../lib/prompts";
 import { CHAPTERS } from "../../lib/walkthrough";
 import type { AnalyzeResponse, GenDone, GenMeta, TokenFrame } from "../../lib/types";
+import { buildHealthReportHtml } from "../../lib/healthReport";
 
 function makeStore() {
   return createStore<StoreState>()((set, get, api) => ({
@@ -500,6 +501,211 @@ test("Phase 5.8a: anchor positions map to correct attention entries and pitch ca
   assert.equal(anchorToLayerIndex(catalog, anchors, -1, numLayers), -1);
   assert.equal(anchorToLayerIndex(catalog, anchors, 999, numLayers), -1);
   assert.equal(anchorToLayerIndex([], [], 0, numLayers), -1);
+});
+
+test("Phase 5.8d: buildHealthReportHtml generates complete report with capabilities matrix, provenance, and timings", () => {
+  const mockSession = {
+    arch: {
+      metadata: {
+        name: "Qwen/Qwen2.5-0.5B",
+        architecture: "Qwen2ForCausalLM",
+        total_params: 490000000,
+        num_layers: 24,
+        num_heads: 14,
+        num_kv_heads: 2,
+        context_length: 32768,
+        hidden_size: 896,
+        torch_dtype: "bfloat16",
+      },
+      tensor_count: 290,
+      tensors: [],
+    },
+    capabilities: {
+      compatibility_level: "High",
+      compatibility_reason: "Full architectural telemetry available.",
+      supports_attention: { supported: true, confidence: "high", reason: "Softmax attention extracted." },
+      supports_hidden_states: { supported: true, confidence: "high", reason: "Residual streams extracted." },
+      supports_logit_lens: { supported: true, confidence: "high", reason: "LM head projection available." },
+      supports_activation_patch: { supported: true, confidence: "medium", reason: "Hooks available." },
+      supports_head_ablation: { supported: false, confidence: "high", reason: "Ablation not configured." },
+      supports_layer_ablation: { supported: true, confidence: "high", reason: "Layer bypass supported." },
+      vram_estimate: { estimated_vram_gb: 1.2, estimation_basis: "Weights + KV", confidence: "high" },
+    },
+    provenance: {
+      source_type: "REAL",
+      backend: "PyTorch (CUDA 12.4)",
+      device: "cuda:0",
+    },
+    timings: {
+      kind: "real" as const,
+      perLayer: [0.45, 0.52, 0.48, 0.61],
+      total: 2.06,
+      max: 0.61,
+    },
+    genFrames: [
+      { type: "token" as const, step: 0, chosen: { id: 1, text: "Hi", logprob: -0.1 }, topk: [], layer_stats: [], eos: false },
+      { type: "token" as const, step: 1, chosen: { id: 2, text: " there", logprob: -0.2 }, topk: [], layer_stats: [], eos: true },
+    ],
+  };
+
+  const html = buildHealthReportHtml(mockSession);
+
+  // 1. Basic document integrity
+  assert.ok(html.includes("<!DOCTYPE html>"), "Contains DOCTYPE");
+  assert.ok(html.includes("TokenPrint Health Report - Qwen/Qwen2.5-0.5B"), "Contains title with model name");
+  assert.ok(html.includes("490.00M"), "Formats total parameter count");
+
+  // 2. Phase 5.8d Capabilities Matrix
+  assert.ok(html.includes("Model Capabilities &amp; Inspection Support"), "Includes capabilities section");
+  assert.ok(html.includes("Compatibility: <strong>High</strong>"), "Includes compatibility level");
+  assert.ok(html.includes("Self-Attention Weights"), "Lists self-attention capability");
+  assert.ok(html.includes("Hidden States &amp; Residuals"), "Lists hidden states capability");
+  assert.ok(html.includes("Logit Lens Projection"), "Lists logit lens capability");
+  assert.ok(html.includes("1.2 GB VRAM"), "Includes VRAM estimate");
+
+  // 3. Phase 5.8d Provenance Section
+  assert.ok(html.includes("Session Provenance &amp; Runtime Authority"), "Includes provenance section");
+  assert.ok(html.includes("REAL DATA"), "Includes REAL data badge");
+  assert.ok(html.includes("PyTorch (CUDA 12.4)"), "Includes execution backend");
+  assert.ok(html.includes("cuda:0"), "Includes target device");
+
+  // 4. Phase 5.8d Timings Section
+  assert.ok(html.includes("Per-Layer Latency &amp; Execution Timings"), "Includes timings section");
+  assert.ok(html.includes("REAL MS · HARDWARE TIME"), "Includes REAL MS timing badge");
+  assert.ok(html.includes("2.06 ms"), "Includes total step latency");
+  assert.ok(html.includes("timing-track"), "Renders timing graph tracks");
+
+  // 5. Printable PDF Features
+  assert.ok(html.includes("@media print"), "Contains @media print stylesheet");
+  assert.ok(html.includes("@page {"), "Contains @page print dimensions");
+  assert.ok(html.includes("print-toolbar"), "Contains interactive toolbar with print button");
+  assert.ok(html.includes("window.print()"), "Contains window.print() action trigger");
+});
+
+test("Phase 5.8d: buildHealthReportHtml handles proxy activation timings gracefully", () => {
+  const mockSession = {
+    arch: {
+      metadata: { name: "GPT-2 Base" },
+      tensor_count: 144,
+      tensors: [],
+    },
+    timings: {
+      kind: "proxy" as const,
+      perLayer: [12.4, 14.2, 10.1],
+      total: null,
+      max: 14.2,
+    },
+  };
+
+  const html = buildHealthReportHtml(mockSession);
+
+  // Must reflect that timings are proxy norms, NOT wall-clock ms
+  assert.ok(html.includes("PROXY · ACTIVATION NORM"), "Labels timing as proxy norm");
+  assert.ok(html.includes("Real hardware execution timings were omitted"), "Explains proxy timing fallback");
+  assert.ok(html.includes("norm"), "Labels timing values with norm suffix instead of ms");
+});
+
+test("Phase 5.8d: buildHealthReportHtml handles null/empty session safely", () => {
+  const html = buildHealthReportHtml({});
+
+  assert.ok(html.includes("<!DOCTYPE html>"), "Renders valid document even for empty input");
+  assert.ok(html.includes("Model Architecture"), "Falls back to default model name");
+  assert.ok(html.includes("Health Score"), "Renders health score badge");
+});
+
+test("Phase 5.8d review fixes: HTML escaping, malformed timings, provenance, font privacy", () => {
+  // 1. Issue 1: Escapes untrusted dimension values against XSS
+  const xssSession: any = {
+    genMeta: {
+      model: "SafeModel",
+      architecture: "Transformer",
+      num_layers: "<script>alert('xss-layers')</script>",
+      model_dimensions: {
+        num_heads: "<img src=x onerror=alert('xss-heads')>",
+        num_kv_heads: "<b onclick='bad()'>kv</b>",
+        context_length: "<div>bad-ctx</div>",
+        hidden_size: "<iframe src=javascript:alert(1)>",
+      },
+    },
+  };
+  const xssHtml = buildHealthReportHtml(xssSession);
+  assert.equal(xssHtml.includes("<script>alert('xss-layers')</script>"), false, "Escapes script tag in layers");
+  assert.equal(xssHtml.includes("<img src=x onerror=alert('xss-heads')>"), false, "Escapes img tag in heads");
+  assert.equal(xssHtml.includes("<iframe src=javascript:alert(1)>"), false, "Escapes iframe in hidden size");
+  assert.ok(xssHtml.includes("&lt;script&gt;"), "Contains escaped HTML entity");
+
+  // 2. Issue 2: Malformed timings do not throw val.toFixed()
+  const malformedTimingsSession: any = {
+    timings: {
+      kind: "real" as const,
+      perLayer: ["bad", NaN, null, undefined, 4.2],
+      total: null,
+      max: 4.2,
+    },
+  };
+  assert.doesNotThrow(() => {
+    const timingHtml = buildHealthReportHtml(malformedTimingsSession);
+    assert.ok(timingHtml.includes("4.20 ms"), "Formats valid numeric entry");
+  });
+
+  // 3. Issue 3: Unmeasured checks appear unknown and health score calculates only from measured
+  const unmeasuredHtml = buildHealthReportHtml({});
+  assert.ok(unmeasuredHtml.includes("— UNKNOWN"), "Unmeasured sentinel checks render UNKNOWN");
+  assert.ok(unmeasuredHtml.includes("Unmeasured · No Telemetry Checks"), "Health score reflects unmeasured state");
+
+  // 4. Issue 4: Missing capabilities appear unknown, not supported
+  const emptyCapsHtml = buildHealthReportHtml({});
+  assert.ok(emptyCapsHtml.includes("Compatibility: <strong>Unknown</strong>"), "Compatibility defaults to Unknown");
+  assert.ok(emptyCapsHtml.includes("Capability status not reported or verified for this session."), "Explains unmeasured capability");
+  assert.equal(emptyCapsHtml.includes("Fully supported and verified by runtime."), false, "Does not falsely claim verified support");
+
+  // 5. Issue 5: Parameter count is not understated via vocab*hidden
+  const dimsOnlySession: any = {
+    genMeta: {
+      model_dimensions: { vocab_size: 32000, hidden_size: 4096 },
+    },
+  };
+  const dimsHtml = buildHealthReportHtml(dimsOnlySession);
+  assert.ok(dimsHtml.includes(">N/A<"), "Displays N/A when total_params is unavailable instead of embedding product");
+  assert.equal(dimsHtml.includes("131.07M"), false, "Does not understate model params as vocab * hidden");
+
+  // 6. Issue 6: Per-layer sum is labeled as sum of per-layer timings, not total step latency
+  const realTimingsSession = {
+    timings: {
+      kind: "real" as const,
+      perLayer: [1.5, 2.5],
+      total: 4.0,
+      max: 2.5,
+    },
+  };
+  const realTimingHtml = buildHealthReportHtml(realTimingsSession);
+  assert.ok(realTimingHtml.includes("Sum of per-layer timings:"), "Accurately labels sum of per-layer timings");
+  assert.equal(realTimingHtml.includes("Total step latency:"), false, "Does not mislabel hook duration as total step latency");
+
+  // 7. Issue 7: Print styles override timing list container height and overflow
+  assert.ok(realTimingHtml.includes(".timing-list-container"), "Uses timing list container class");
+  assert.ok(
+    realTimingHtml.includes(".timing-list-container {\n        max-height: none !important;\n        overflow: visible !important;\n        height: auto !important;\n      }"),
+    "Overrides timing container max-height and overflow in print styles"
+  );
+
+  // 8. Issue 8: Provenance without evidence is labeled unknown / unverified
+  const noEvidenceHtml = buildHealthReportHtml({});
+  assert.ok(noEvidenceHtml.includes("UNKNOWN DATA"), "Badges unknown origin when no evidence provided");
+  assert.equal(noEvidenceHtml.includes("● VERIFIED"), false, "Does not assert verified backend without evidence");
+  assert.equal(noEvidenceHtml.includes("● ACTIVE"), false, "Does not assert active device without evidence");
+
+  // 9. Issue 9: Report does not contact Google Fonts.
+  // Extract exact hosts instead of substring-matching, so a lookalike domain
+  // (e.g. fonts.googleapis.com.evil.example) cannot satisfy the assertion.
+  const externalHosts = new Set(
+    Array.from(
+      realTimingHtml.matchAll(/(?:https?:)?\/\/([^/\s"'<>]+)/gi),
+      (m) => (m[1] ?? "").toLowerCase()
+    )
+  );
+  assert.equal(externalHosts.has("fonts.googleapis.com"), false, "Does not contact fonts.googleapis.com");
+  assert.equal(externalHosts.has("fonts.gstatic.com"), false, "Does not contact fonts.gstatic.com");
 });
 
 test("Phase 5.8c: Collab store slice toggling, initial state, and peer management", () => {
