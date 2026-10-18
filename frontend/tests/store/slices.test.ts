@@ -14,6 +14,7 @@ import { storeDefinition } from "../../lib/store/index";
 import { PRESET_PROMPTS, isByteFallbackToken } from "../../lib/prompts";
 import { CHAPTERS } from "../../lib/walkthrough";
 import type { AnalyzeResponse, GenDone, GenMeta, TokenFrame } from "../../lib/types";
+import { buildHealthReportHtml } from "../../lib/healthReport";
 
 function makeStore() {
   return createStore<StoreState>()((set, get, api) => ({
@@ -501,3 +502,114 @@ test("Phase 5.8a: anchor positions map to correct attention entries and pitch ca
   assert.equal(anchorToLayerIndex(catalog, anchors, 999, numLayers), -1);
   assert.equal(anchorToLayerIndex([], [], 0, numLayers), -1);
 });
+
+test("Phase 5.8d: buildHealthReportHtml generates complete report with capabilities matrix, provenance, and timings", () => {
+  const mockSession = {
+    arch: {
+      metadata: {
+        name: "Qwen/Qwen2.5-0.5B",
+        architecture: "Qwen2ForCausalLM",
+        total_params: 490000000,
+        num_layers: 24,
+        num_heads: 14,
+        num_kv_heads: 2,
+        context_length: 32768,
+        hidden_size: 896,
+        torch_dtype: "bfloat16",
+      },
+      tensor_count: 290,
+      tensors: [],
+    },
+    capabilities: {
+      compatibility_level: "High",
+      compatibility_reason: "Full architectural telemetry available.",
+      supports_attention: { supported: true, confidence: "high", reason: "Softmax attention extracted." },
+      supports_hidden_states: { supported: true, confidence: "high", reason: "Residual streams extracted." },
+      supports_logit_lens: { supported: true, confidence: "high", reason: "LM head projection available." },
+      supports_activation_patch: { supported: true, confidence: "medium", reason: "Hooks available." },
+      supports_head_ablation: { supported: false, confidence: "high", reason: "Ablation not configured." },
+      supports_layer_ablation: { supported: true, confidence: "high", reason: "Layer bypass supported." },
+      vram_estimate: { estimated_vram_gb: 1.2, estimation_basis: "Weights + KV", confidence: "high" },
+    },
+    provenance: {
+      source_type: "REAL",
+      backend: "PyTorch (CUDA 12.4)",
+      device: "cuda:0",
+    },
+    timings: {
+      kind: "real" as const,
+      perLayer: [0.45, 0.52, 0.48, 0.61],
+      total: 2.06,
+      max: 0.61,
+    },
+    genFrames: [
+      { type: "token" as const, step: 0, chosen: { id: 1, text: "Hi", logprob: -0.1 }, topk: [], layer_stats: [], eos: false },
+      { type: "token" as const, step: 1, chosen: { id: 2, text: " there", logprob: -0.2 }, topk: [], layer_stats: [], eos: true },
+    ],
+  };
+
+  const html = buildHealthReportHtml(mockSession);
+
+  // 1. Basic document integrity
+  assert.ok(html.includes("<!DOCTYPE html>"), "Contains DOCTYPE");
+  assert.ok(html.includes("TokenPrint Health Report - Qwen/Qwen2.5-0.5B"), "Contains title with model name");
+  assert.ok(html.includes("490.00M"), "Formats total parameter count");
+
+  // 2. Phase 5.8d Capabilities Matrix
+  assert.ok(html.includes("Model Capabilities &amp; Inspection Support"), "Includes capabilities section");
+  assert.ok(html.includes("Compatibility: <strong>High</strong>"), "Includes compatibility level");
+  assert.ok(html.includes("Self-Attention Weights"), "Lists self-attention capability");
+  assert.ok(html.includes("Hidden States &amp; Residuals"), "Lists hidden states capability");
+  assert.ok(html.includes("Logit Lens Projection"), "Lists logit lens capability");
+  assert.ok(html.includes("1.2 GB VRAM"), "Includes VRAM estimate");
+
+  // 3. Phase 5.8d Provenance Section
+  assert.ok(html.includes("Session Provenance &amp; Runtime Authority"), "Includes provenance section");
+  assert.ok(html.includes("REAL DATA"), "Includes REAL data badge");
+  assert.ok(html.includes("PyTorch (CUDA 12.4)"), "Includes execution backend");
+  assert.ok(html.includes("cuda:0"), "Includes target device");
+
+  // 4. Phase 5.8d Timings Section
+  assert.ok(html.includes("Per-Layer Latency &amp; Execution Timings"), "Includes timings section");
+  assert.ok(html.includes("REAL MS · HARDWARE TIME"), "Includes REAL MS timing badge");
+  assert.ok(html.includes("2.06 ms"), "Includes total step latency");
+  assert.ok(html.includes("timing-track"), "Renders timing graph tracks");
+
+  // 5. Printable PDF Features
+  assert.ok(html.includes("@media print"), "Contains @media print stylesheet");
+  assert.ok(html.includes("@page {"), "Contains @page print dimensions");
+  assert.ok(html.includes("print-toolbar"), "Contains interactive toolbar with print button");
+  assert.ok(html.includes("window.print()"), "Contains window.print() action trigger");
+});
+
+test("Phase 5.8d: buildHealthReportHtml handles proxy activation timings gracefully", () => {
+  const mockSession = {
+    arch: {
+      metadata: { name: "GPT-2 Base" },
+      tensor_count: 144,
+      tensors: [],
+    },
+    timings: {
+      kind: "proxy" as const,
+      perLayer: [12.4, 14.2, 10.1],
+      total: null,
+      max: 14.2,
+    },
+  };
+
+  const html = buildHealthReportHtml(mockSession);
+
+  // Must reflect that timings are proxy norms, NOT wall-clock ms
+  assert.ok(html.includes("PROXY · ACTIVATION NORM"), "Labels timing as proxy norm");
+  assert.ok(html.includes("Real hardware execution timings were omitted"), "Explains proxy timing fallback");
+  assert.ok(html.includes("norm"), "Labels timing values with norm suffix instead of ms");
+});
+
+test("Phase 5.8d: buildHealthReportHtml handles null/empty session safely", () => {
+  const html = buildHealthReportHtml({});
+
+  assert.ok(html.includes("<!DOCTYPE html>"), "Renders valid document even for empty input");
+  assert.ok(html.includes("Model Architecture"), "Falls back to default model name");
+  assert.ok(html.includes("Health Score"), "Renders health score badge");
+});
+
