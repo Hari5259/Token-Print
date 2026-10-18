@@ -7,6 +7,8 @@ import { phaseInfo } from "@/lib/playback";
 import { opById } from "@/components/scenes/TransformerOperationGraph";
 import { Button, IconButton, Badge, TOKENS } from "./primitives";
 import { CameraControlGroup } from "./CameraControlGroup";
+import { tokenStyle } from "@/lib/tokenDisplay";
+import { specTokenLabel } from "@/lib/specDecoding";
 
 function disp(t: string): string {
   const s = t.replace(/\n/g, "\u23CE");
@@ -156,7 +158,7 @@ function GenBottomBar() {
 
   if (!hasCatalog && frames.length === 0) return null;
 
-  const gen = frames.filter((f) => !f.eos).map((f) => f.chosen.text);
+  const genFrames = frames.filter((f) => !f.eos);
   const TAIL = 8;
   const promptTail = meta?.prompt_tokens.slice(-TAIL) ?? [];
   const truncated = (meta?.prompt_tokens.length ?? 0) > TAIL;
@@ -205,15 +207,13 @@ function GenBottomBar() {
             {disp(t)}
           </span>
         ))}
-        {gen.map((t, i) => (
+        {genFrames.map((f, i) => (
           <span
             key={"g" + i}
-            style={{
-              color: i === gen.length - 1 ? TOKENS.textPrimary : TOKENS.textSecondary,
-              fontWeight: i === gen.length - 1 ? 600 : 400,
-            }}
+            style={tokenStyle(f, i === genFrames.length - 1)}
+            title={specTokenLabel(f) || undefined}
           >
-            {disp(t)}
+            {disp(f.chosen.text)}
           </span>
         ))}
         {status === "streaming" && <span style={{ color: TOKENS.textPrimary }}>▌</span>}
