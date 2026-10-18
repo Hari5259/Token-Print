@@ -137,6 +137,7 @@ export default function GenerationPanel() {
   const stepOp = useStore((s) => s.stepOp);
   const status = useStore((s) => s.genStatus);
   const frame = useStore((s) => (s.playIndex >= 0 ? s.genFrames[s.playIndex] : null));
+  const genDone = useStore((s) => s.genDone);
 
   const catalog = meta?.op_catalog ?? [];
   const nLayers = meta?.num_layers ?? 0;
@@ -266,11 +267,130 @@ export default function GenerationPanel() {
         <div style={rowStyle}><span style={keyStyle}>CACHE LEN</span><span style={valStyle}>{cacheLen != null ? cacheLen : NA}</span></div>
         <div style={rowStyle}><span style={keyStyle}>POSITIONS</span><span style={valStyle}>{nPos != null ? nPos : NA}</span></div>
         <div style={rowStyle}><span style={keyStyle}>PROMPT LEN</span><span style={valStyle}>{meta?.prompt_len != null ? meta.prompt_len : NA}</span></div>
+        {/* Sliding-window mode: show the configured window size and whether the
+            cache has been trimmed yet (cache_len < positions). Source: the
+            meta.decoding_params.window_size sent by the backend in the meta
+            frame. cache_len is the real fed-cache length every step. */}
+        {meta?.decoding === "sliding_window" && dp.window_size != null && (
+          <div style={rowStyle}>
+            <span style={keyStyle}>WINDOW SIZE</span>
+            <span style={{ ...valStyle, color: cacheLen != null && cacheLen >= dp.window_size ? "#ffd36e" : TOKENS.textSecondary }}>
+              {dp.window_size}
+              {cacheLen != null && cacheLen >= dp.window_size ? " · trimming" : " · growing"}
+            </span>
+          </div>
+        )}
         <div style={{ ...rowStyle, borderBottom: "none" }}>
           <span style={keyStyle}>CONTEXT</span>
-          <span style={valStyle}>{meta?.prompt_len != null && cacheLen != null ? meta.prompt_len + cacheLen : NA}</span>
+          {/* CONTEXT = cache_len (total cached positions).
+              cache_len already includes the prompt. On the first decode step it
+              equals prompt_len (prefilled prompt); on subsequent steps it grows
+              by n_positions. For sliding-window runs it caps at window_size once
+              trimming begins. */}
+          <span style={valStyle}>{cacheLen != null ? cacheLen : NA}</span>
         </div>
       </div>
+
+      {/* SPECULATIVE DECODING — only when spec fields are present on the frame */}
+      {frame?.n_accepted != null && (
+        <div style={sectStyle}>
+          <SectionTitle title="SPECULATIVE DECODING" right="real" />
+          <div style={rowStyle}>
+            <span style={keyStyle}>ACCEPTED</span>
+            <span style={{ ...valStyle, color: "#7fd7c8" }}>{frame.n_accepted}</span>
+          </div>
+          <div style={rowStyle}>
+            <span style={keyStyle}>DRAFT POSITION</span>
+            {/* draft_pos: 0-based index of this token in the emitted batch.
+                draft_pos < n_accepted  → accepted draft token (orange)
+                draft_pos == n_accepted → target continuation (gold) */}
+            <span style={{ ...valStyle, color: frame.spec_cont ? "#ffd36e" : "#ff9f43" }}>
+              {frame.draft_pos != null ? frame.draft_pos : "—"}
+              {frame.spec_cont === false ? " (draft)" : frame.spec_cont === true ? " (target)" : ""}
+            </span>
+          </div>
+          <div style={rowStyle}>
+            <span style={keyStyle}>IS CONTINUATION</span>
+            <span style={{ ...valStyle, color: frame.spec_cont ? "#ffd36e" : TOKENS.textSecondary }}>
+              {frame.spec_cont == null ? "—" : frame.spec_cont ? "yes" : "no"}
+            </span>
+          </div>
+          <div style={{ ...rowStyle, borderBottom: "none" }}>
+            <span style={keyStyle}>SPEC BATCH</span>
+            <span style={valStyle}>
+              {frame.draft_batch ? "yes" : "—"}
+            </span>
+          </div>
+        </div>
+      )}
+      {/* Run-level spec summary — shown after generation completes */}
+      {genDone?.drafts_accepted != null && genDone.draft_batches != null && (
+        <div style={sectStyle}>
+          <SectionTitle title="SPEC SUMMARY" right="run total" />
+          <div style={rowStyle}>
+            <span style={keyStyle}>DRAFTS PROPOSED</span>
+            <span style={valStyle}>
+              {(genDone.drafts_proposed ?? (genDone.draft_batches * (meta?.decoding_params?.draft_gamma ?? 4)))}
+            </span>
+          </div>
+          <div style={rowStyle}>
+            <span style={keyStyle}>DRAFTS ACCEPTED</span>
+            <span style={{ ...valStyle, color: "#7fd7c8" }}>{genDone.drafts_accepted}</span>
+          </div>
+          <div style={rowStyle}>
+            <span style={keyStyle}>DRAFTS REJECTED</span>
+            <span style={{ ...valStyle, color: "#ff6b6b" }}>
+              {(genDone.drafts_rejected ?? ((genDone.draft_batches * (meta?.decoding_params?.draft_gamma ?? 4)) - genDone.drafts_accepted))}
+            </span>
+          </div>
+          <div style={{ ...rowStyle, borderBottom: "none" }}>
+            <span style={keyStyle}>ACCEPTANCE RATE</span>
+            <span style={{ ...valStyle, color: "#7fd7c8" }}>
+              {genDone.acceptance_rate != null ? `${(genDone.acceptance_rate * 100).toFixed(1)}%` : NA}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* NEEDLE RECALL — shown after generation when needle was enabled.
+          needle_report is on the done frame only; no per-token needle field
+          exists. The backend checks whether the needle text appears in the
+          generated response (model.py:1418-1425). The needle is embedded in
+          the prompt, so prompt_len and window_size context shows whether the
+          needle was kept in cache or evicted during sliding-window trimming. */}
+      {genDone?.needle_report && (
+        <div style={sectStyle}>
+          <SectionTitle title="NEEDLE RECALL" right={genDone.needle_report.recalled ? "✓ recalled" : "✗ missed"} />
+          <div style={rowStyle}>
+            <span style={keyStyle}>NEEDLE</span>
+            <span style={{ ...valStyle, color: TOKENS.textSecondary, maxWidth: "130px" }}>
+              {genDone.needle_report.needle}
+            </span>
+          </div>
+          <div style={rowStyle}>
+            <span style={keyStyle}>PROMPT LENGTH</span>
+            <span style={valStyle}>{meta?.prompt_len ?? NA}</span>
+          </div>
+          {meta?.decoding === "sliding_window" && dp.window_size != null && (
+            <div style={rowStyle}>
+              <span style={keyStyle}>WINDOW SIZE</span>
+              <span style={{
+                ...valStyle,
+                color: (meta?.prompt_len ?? 0) > dp.window_size ? "#ff6b6b" : "#7fd7c8"
+              }}>
+                {dp.window_size}
+                {(meta?.prompt_len ?? 0) > dp.window_size ? " · needle evicted" : " · needle kept"}
+              </span>
+            </div>
+          )}
+          <div style={{ ...rowStyle, borderBottom: "none" }}>
+            <span style={keyStyle}>RECALLED</span>
+            <span style={{ ...valStyle, color: genDone.needle_report.recalled ? "#7fd7c8" : "#ff6b6b", fontWeight: 600 }}>
+              {genDone.needle_report.recalled ? "yes" : "no"}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* OPERATION */}
       <div style={sectStyle}>

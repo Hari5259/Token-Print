@@ -27,6 +27,7 @@ import TraceGallery from "./ui/TraceGallery";
 import { HFModelPicker } from "./ui/HFModelPicker";
 import { ContextualExplanationOverlay } from "./ui/ContextualExplanationOverlay";
 import { DevDiagnosticsHUD } from "./ui/DevDiagnosticsHUD";
+import { CollabCursorOverlay } from "./collab/CollabCursorOverlay";
 import { fmtShape } from "@/lib/format";
 import { roleLabel } from "@/lib/tensorName";
 import { useKeyboard } from "@/lib/useKeyboard";
@@ -80,6 +81,21 @@ export default function AppShell() {
   useLayoutEffect(() => {
     if (storeMode !== mode) useStore.getState().setMode(mode);
   }, [mode, storeMode]);
+
+  // Phase 5.8c (#301): Auto-join collab session if present in URL (?collab=true or ?room=xyz)
+  const collabParam = searchParams?.get("collab");
+  const roomParam = searchParams?.get("room");
+  const wtModel = useStore((s) => s.wtModel);
+  const genMetaModel = useStore((s) => s.genMeta?.model);
+  useEffect(() => {
+    if (collabParam === "true" || roomParam) {
+      const activeModelId = ((genMetaModel || wtModel || "main") as string).replace(/[^a-zA-Z0-9_\-\.:]/g, "_");
+      useStore.setState({
+        collabEnabled: true,
+        collabRoomId: roomParam || `model_${activeModelId}`,
+      });
+    }
+  }, [collabParam, roomParam, wtModel, genMetaModel]);
 
   // Responsive sidebar collapse state
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -247,6 +263,7 @@ export default function AppShell() {
           onToggleCollapse={() => setRightCollapsed(!rightCollapsed)}
         />
       )}
+      <CollabCursorOverlay />
     </div>
   );
 }

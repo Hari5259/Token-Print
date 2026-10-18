@@ -1399,6 +1399,23 @@ code {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Issue #297 — speculative decoding: accepted draft proposal vs target token.
+   Rendered only on frames the backend tagged with accepted_drafts.
+   Uses !important on colour so .tok.gen.last (the "current token" highlight)
+   does not clobber orange/gold on a speculative token that also happens to be
+   the last one generated. Background intentionally blends the two signals. */
+.tok.gen.draft {
+  color: #ff9f43 !important;
+  background: rgba(255, 159, 67, 0.14);
+  box-shadow: inset 0 -1px 0 rgba(255, 159, 67, 0.55);
+}
+
+.tok.gen.target {
+  color: #ffd36e !important;
+  background: rgba(255, 211, 110, 0.16);
+  box-shadow: inset 0 -1px 0 rgba(255, 211, 110, 0.7);
+}
+
 .tok.gen.last {
   background: rgba(255, 255, 255, 0.24);
   color: #ffffff;

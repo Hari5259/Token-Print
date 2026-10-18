@@ -1178,6 +1178,7 @@ class ModelEngine:
             generated_ids: list[int] = []
             drafts_accepted = 0
             draft_batches = 0
+            drafts_proposed = 0
 
             # -- MoE routing hooks (issue #294, Phase 5.1) ------------------
             # Detect MoE blocks ONCE before the decode loop: _detect_moe_blocks()
@@ -1294,6 +1295,7 @@ class ModelEngine:
                     if decoding_mode == "speculative" and phase == "decode" and draft_gamma > 1 and step + draft_gamma <= max_new_tokens:
                         # --- Self-speculative pass: draft + verify in one batch. ---
                         draft_batches += 1
+                        drafts_proposed += draft_gamma
                         # The draft distribution is the model's own next-token
                         # distribution sharpened (temperature 0.6) — a cheap,
                         # confident draft. torch.multinomial segfaults on MPS, so
@@ -1483,9 +1485,11 @@ class ModelEngine:
                 done["decoding_mode"] = decoding_mode
             if decoding_mode == "speculative":
                 done["draft_batches"] = draft_batches
+                done["drafts_proposed"] = drafts_proposed
                 done["drafts_accepted"] = drafts_accepted
+                done["drafts_rejected"] = drafts_proposed - drafts_accepted
                 done["acceptance_rate"] = round(
-                    drafts_accepted / max(draft_batches * draft_gamma, 1), 4
+                    drafts_accepted / max(drafts_proposed, 1), 4
                 )
             if needle_report:
                 done["needle_report"] = needle_report

@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from .ablation import Ablation
+from .collab import collab_manager
 from .gguf_cache import GGUFEngineCache
 from .gguf_engine import GGUF_ENGINE_AVAILABLE, GGUFEngine
 from .model import ModelEngine, TokenizedTooLong
@@ -875,6 +877,87 @@ async def ws_generate(ws: WebSocket) -> None:
             await ws.close()  # graceful close frame after the stream ends
         except (RuntimeError, WebSocketDisconnect):
             logger.debug("WebSocket already closed.")
+
+
+# --------------------------------------------------------------------------- #
+# Collaborative Multi-Viewer & Classroom Cursors (Phase 5.8c / #301)
+# --------------------------------------------------------------------------- #
+
+_COLLAB_ROOM_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.:]{1,64}$")
+_COLLAB_USER_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.:]{1,64}$")
+_COLLAB_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+@app.websocket("/ws/collab/{room_id}")
+async def ws_collab(
+    ws: WebSocket,
+    room_id: str,
+    user_id: str = "anon",
+    name: str = "Viewer",
+    color: str = "#38bdf8",
+    role: str = "viewer",
+) -> None:
+    """Collaborative multi-viewer channel for presence, cursors, and selection.
+
+    Allows multiple browser tabs/viewers over the same served trace or model
+    to share presence, pointer coordinates, layer/op selections, and
+    classroom presenter stepping.
+    """
+    # Reject malformed room IDs before accepting
+    if not _COLLAB_ROOM_PATTERN.match(room_id):
+        await ws.close(code=1008)
+        return
+
+    # If anonymous or empty, assign a unique distinct ID to avoid collisions
+    if not user_id or user_id == "anon":
+        user_id = f"u_{uuid.uuid4().hex[:8]}"
+    elif not _COLLAB_USER_PATTERN.match(user_id):
+        await ws.close(code=1008)
+        return
+
+    if role not in ("viewer", "presenter"):
+        await ws.close(code=1008)
+        return
+
+    if not _COLLAB_COLOR_PATTERN.match(color):
+        await ws.close(code=1008)
+        return
+
+    name = (name.strip()[:32] if name else "Viewer") or "Viewer"
+
+    await ws.accept()
+    peer = await collab_manager.connect(
+        room_id=room_id,
+        user_id=user_id,
+        ws=ws,
+        name=name,
+        color=color,
+        role=role,
+    )
+    if peer is None:
+        await ws.close(code=1008)
+        return
+
+    try:
+        while True:
+            data = await ws.receive_json()
+            if not isinstance(data, dict):
+                continue
+            await collab_manager.handle_message(room_id, user_id, data)
+    except WebSocketDisconnect:
+        logger.info(
+            "Collab peer %s disconnected from room %s.",
+            user_id.replace("\n", "").replace("\r", ""),
+            room_id.replace("\n", "").replace("\r", ""),
+        )
+    except Exception as exc:  # noqa: BLE001 — keep the collab room alive on per-message errors
+        logger.debug(
+            "Collab websocket exception for %s: %s",
+            user_id.replace("\n", "").replace("\r", ""),
+            str(exc).replace("\n", "").replace("\r", ""),
+        )
+    finally:
+        await collab_manager.disconnect(room_id, user_id, ws)
 
 
 # --------------------------------------------------------------------------- #
