@@ -330,7 +330,7 @@ export default function GenerationPanel() {
           <div style={rowStyle}>
             <span style={keyStyle}>DRAFTS PROPOSED</span>
             <span style={valStyle}>
-              {(genDone.draft_batches * (meta?.decoding_params?.draft_gamma ?? 4))}
+              {(genDone.drafts_proposed ?? (genDone.draft_batches * (meta?.decoding_params?.draft_gamma ?? 4)))}
             </span>
           </div>
           <div style={rowStyle}>
@@ -340,7 +340,7 @@ export default function GenerationPanel() {
           <div style={rowStyle}>
             <span style={keyStyle}>DRAFTS REJECTED</span>
             <span style={{ ...valStyle, color: "#ff6b6b" }}>
-              {(genDone.draft_batches * (meta?.decoding_params?.draft_gamma ?? 4)) - genDone.drafts_accepted}
+              {(genDone.drafts_rejected ?? ((genDone.draft_batches * (meta?.decoding_params?.draft_gamma ?? 4)) - genDone.drafts_accepted))}
             </span>
           </div>
           <div style={{ ...rowStyle, borderBottom: "none" }}>

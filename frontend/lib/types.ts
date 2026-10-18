@@ -268,7 +268,9 @@ export interface GenMeta {
 export interface GenDoneStats {
   decoding_mode?: string;
   draft_batches?: number;
+  drafts_proposed?: number;
   drafts_accepted?: number;
+  drafts_rejected?: number;
   acceptance_rate?: number;
   needle_report?: { needle: string; recalled: boolean; response: string };
 }
@@ -279,6 +281,8 @@ export interface GenDone {
   total_steps: number;
   decoding_mode?: string;
   draft_batches?: number;
+  drafts_proposed?: number;
+  drafts_rejected?: number;
   drafts_accepted?: number;
   acceptance_rate?: number;
   needle_report?: { needle: string; recalled: boolean; response: string };
