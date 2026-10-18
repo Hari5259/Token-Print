@@ -1,11 +1,11 @@
+import itertools
 import types
 import unittest
 from unittest.mock import MagicMock
 
 import torch
-from torch import nn
-
 from app.model import ActivationEngine, GenerationState, ModelEngine
+from torch import nn
 
 
 class DummyCache:
@@ -205,7 +205,7 @@ class TestCacheLenTracksPositionsDone(unittest.TestCase):
 
         # Strictly monotonically non-decreasing
         cache_lens = [f["cache_len"] for f in token_frames]
-        for a, b in zip(cache_lens, cache_lens[1:]):
+        for a, b in itertools.pairwise(cache_lens):
             self.assertGreaterEqual(b, a, msg="cache_len must not decrease between steps")
 
     def test_speculative_cache_len_tracks_positions_done(self):
@@ -281,7 +281,7 @@ class TestCacheLenTracksPositionsDone(unittest.TestCase):
         )
         token_frames = self._collect_token_frames(frames)
         cache_lens = [f["cache_len"] for f in token_frames]
-        for idx, (a, b) in enumerate(zip(cache_lens, cache_lens[1:])):
+        for idx, (a, b) in enumerate(itertools.pairwise(cache_lens)):
             self.assertGreaterEqual(
                 b, a,
                 msg=(
