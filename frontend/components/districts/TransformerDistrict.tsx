@@ -1,194 +1,20 @@
 "use client";
 
 import { useMemo, useRef } from "react";
-import { Billboard, Html, Line, Text } from "@react-three/drei";
+import { Billboard, Text } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { Color, Mesh, MeshStandardMaterial } from "three";
 
+import DecodeModeOverlays from "@/components/scenes/DecodeModeOverlays";
 import { useStore } from "@/lib/store";
 
 const STACK_X = -8;
 const SLAB_GAP = 0.5;
 const BAR_SCALE = 8; // world height for probability 1.0
 
-// The probability skyline is laid out around x = 4 (see the skyline below).
-const SKYLINE_X = 4;
-
 function layerColor(i: number, n: number): Color {
   // blue at the input (layer 0) -> warm near the output.
   return new Color().setHSL(0.6 - (i / Math.max(1, n - 1)) * 0.42, 0.8, 0.5);
-}
-
-/**
- * Speculative-decoding readout (issue #297).
- *
- * Shows the current token's speculative status as a fixed 2D overlay.
- * Everything drawn here is a real frame value: nothing is hardcoded.
- */
-function SpeculativeReadout({
-  nAccepted,
-  draftPos,
-  gamma,
-}: {
-  nAccepted: number;
-  draftPos: number;
-  gamma: number | undefined;
-}) {
-  const isContinuation = draftPos >= nAccepted;
-  const label = isContinuation
-    ? `spec: ${nAccepted}/${gamma ?? "?"} drafts accepted`
-    : `spec: draft ${draftPos + 1} of ${nAccepted} accepted`;
-
-  return (
-    <Html fullscreen style={{ pointerEvents: "none" }}>
-      <div
-        style={{
-          position: "absolute",
-          top: "20px",
-          right: "20px",
-          fontFamily: "monospace",
-          fontSize: "14px",
-          fontWeight: 600,
-          color: isContinuation ? "#ffd36e" : "#ff9f43",
-          background: "rgba(0,0,0,0.7)",
-          padding: "8px 12px",
-          borderRadius: "4px",
-          border: `1px solid ${isContinuation ? "#ffd36e" : "#ff9f43"}`,
-          textShadow: "0 0 4px rgba(0,0,0,0.8)",
-          zIndex: 100,
-        }}
-      >
-        {label}
-      </div>
-    </Html>
-  );
-}
-
-/**
- * Sliding-window KV cache visual (issue #297).
- *
- * Rendered as a fixed 2D overlay in the viewport (not world space) so it's
- * always visible regardless of camera position. Shows the real cache status:
- * kept vs trimmed positions, boundary line, and numeric readout. All values
- * from real frame fields and meta.
- *
- * Source: model.py:1232-1234 (trim_cache call and cache_len_in = window_size).
- */
-function SlidingWindowBar({
-  cacheLen,
-  windowSize,
-  totalPositions,
-}: {
-  cacheLen: number;
-  windowSize: number;
-  totalPositions: number;
-}) {
-  if (totalPositions <= 0) return null;
-
-  const isTrimming = cacheLen >= windowSize;
-  const windowFrac = Math.min(cacheLen / Math.max(totalPositions, 1), 1.0);
-
-  return (
-    <Html fullscreen style={{ pointerEvents: "none" }}>
-      <div
-        style={{
-          position: "absolute",
-          bottom: "80px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "4px",
-          zIndex: 100,
-        }}
-      >
-        {/* Bar container */}
-        <div
-          style={{
-            width: "400px",
-            height: "16px",
-            background: "#1a2030",
-            borderRadius: "3px",
-            position: "relative",
-            overflow: "visible",
-            border: "1px solid rgba(255,255,255,0.1)",
-          }}
-        >
-          {/* Active window overlay */}
-          <div
-            style={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              height: "100%",
-              width: `${windowFrac * 100}%`,
-              background: isTrimming
-                ? "linear-gradient(90deg, rgba(255,211,110,0.3), rgba(255,211,110,0.5))"
-                : "linear-gradient(90deg, rgba(87,208,255,0.3), rgba(87,208,255,0.5))",
-              borderRadius: "2px",
-            }}
-          />
-          {/* Boundary line at window limit */}
-          {isTrimming && (
-            <div
-              style={{
-                position: "absolute",
-                right: `${(1 - windowFrac) * 100}%`,
-                top: "-2px",
-                bottom: "-2px",
-                width: "2px",
-                background: "#ff6b6b",
-              }}
-            />
-          )}
-        </div>
-        {/* Label */}
-        <div
-          style={{
-            fontFamily: "monospace",
-            fontSize: "11px",
-            color: isTrimming ? "#ffd36e" : "#57d0ff",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {isTrimming
-            ? `KV window: ${cacheLen} / ${windowSize} (trimming oldest)`
-            : `KV cache: ${cacheLen} / ${totalPositions} positions`}
-        </div>
-      </div>
-    </Html>
-  );
-}
-
-/**
- * Needle recall banner (issue #297).
- * needle_report only exists on the done frame — no per-token attention field
- * is emitted. We show the recall result as a billboard once generation ends.
- * Source: model.py:1418-1425 (needle_report built post-loop, in done dict).
- */
-function NeedleRecallBanner({
-  needle,
-  recalled,
-}: {
-  needle: string;
-  recalled: boolean;
-}) {
-  const short = needle.length > 28 ? needle.slice(0, 25) + "…" : needle;
-  return (
-    <Billboard position={[SKYLINE_X, BAR_SCALE + 3.0, 0]}>
-      <Text
-        fontSize={0.38}
-        color={recalled ? "#55efc4" : "#ff6b6b"}
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.02}
-        outlineColor="#000000"
-      >
-        {recalled ? `✓ needle recalled: "${short}"` : `✗ needle missed: "${short}"`}
-      </Text>
-    </Billboard>
-  );
 }
 
 /**
@@ -202,7 +28,6 @@ export default function TransformerDistrict() {
   const frames = useStore((s) => s.genFrames);
   const playIndex = useStore((s) => s.playIndex);
   const genStatus = useStore((s) => s.genStatus);
-  const genDone = useStore((s) => s.genDone);
 
   const nLayers = meta?.num_layer_stats ?? 25;
   const topK = meta?.top_k ?? 10;
@@ -213,28 +38,6 @@ export default function TransformerDistrict() {
       : frames.length
         ? frames[frames.length - 1]
         : null;
-
-  // Does ANY frame in this run carry speculative-decoding annotations? Drives
-  // whether the readout is mounted at all, so greedy runs pay nothing.
-  const hasSpecData = useMemo(
-    () => frames.some((f) => f.accepted_drafts === true),
-    [frames],
-  );
-
-  // Speculative fields for the CURRENT frame (absent on greedy frames).
-  const specNAccepted = frame?.n_accepted;
-  const specDraftPos = frame?.draft_pos;
-  const specGamma = meta?.decoding_params?.draft_gamma;
-
-  // Sliding-window fields — cache_len is the real fed-cache length per frame.
-  const isSlidingWindow = meta?.decoding === "sliding_window";
-  const windowSize = meta?.decoding_params?.window_size ?? 512;
-  const cacheLen = frame?.cache_len ?? 0;
-  // total positions seen so far = prompt_len + step index (approx from frame.step)
-  const totalPositions = (meta?.prompt_len ?? 0) + (frame?.step ?? 0) + 1;
-
-  // Needle recall — only on done frame, shown after generation finishes.
-  const needleReport = genDone?.needle_report ?? null;
 
   const slabRefs = useRef<Array<Mesh | null>>([]);
   const barRefs = useRef<Array<Mesh | null>>([]);
@@ -342,34 +145,9 @@ export default function TransformerDistrict() {
         );
       })}
 
-      {/* --- Speculative decoding readout (issue #297) --- */}
-      {hasSpecData &&
-        frame?.accepted_drafts === true &&
-        specNAccepted != null &&
-        specDraftPos != null && (
-          <SpeculativeReadout
-            nAccepted={specNAccepted}
-            draftPos={specDraftPos}
-            gamma={specGamma}
-          />
-        )}
-
-      {/* --- Sliding-window KV cache bar (issue #297) --- */}
-      {isSlidingWindow && cacheLen > 0 && (
-        <SlidingWindowBar
-          cacheLen={cacheLen}
-          windowSize={windowSize}
-          totalPositions={totalPositions}
-        />
-      )}
-
-      {/* --- Needle recall banner (issue #297) — post-generation only --- */}
-      {needleReport && (
-        <NeedleRecallBanner
-          needle={needleReport.needle}
-          recalled={needleReport.recalled}
-        />
-      )}
+      {/* --- Decode-mode overlays (issue #297): speculative readout, KV window bar,
+             needle recall — shared with GenerationScene. --- */}
+      <DecodeModeOverlays />
 
       {/* --- Generated text / status readout --- */}
       <Billboard position={[0, -3.4, 0]}>

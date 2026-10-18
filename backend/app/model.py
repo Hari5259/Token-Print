@@ -1211,7 +1211,8 @@ class ModelEngine:
 
             def emit_frame(step, chosen_id, probs, logits, hidden_states,
                            phase, n_positions, cache_len_in,
-                           extra: dict | None = None, attentions=None):
+                           extra: dict | None = None, attentions=None,
+                           cache_trimmed: bool = False):
                 topk = probs.topk(top_k)
                 top_ids = topk.indices[0].tolist()
                 top_probs = topk.values[0].tolist()
@@ -1259,6 +1260,11 @@ class ModelEngine:
                     "phase": phase,
                     "n_positions": n_positions,
                     "cache_len": cache_len_in,
+                    # Issue #297: True only on frames whose cache was actually
+                    # trimmed this step (sliding-window). The frontend must not
+                    # infer "trimming" from cache_len == window_size alone: a
+                    # cache that is exactly full has NOT been trimmed yet.
+                    "cache_trimmed": cache_trimmed,
                 }
                 if extra:
                     frame.update(extra)
@@ -1270,11 +1276,13 @@ class ModelEngine:
                 while step < max_new_tokens:
                     n_positions = int(cur.shape[1])
                     cache_len_in = state.positions_done
+                    cache_trimmed = False
                     phase = "prefill" if state.past_key_values is None else "decode"
 
                     if decoding_mode == "sliding_window" and state.past_key_values is not None and state.positions_done > window_size:
                         state.trim_cache(window_size)
                         cache_len_in = window_size  # after trim, the model is fed exactly window_size entries
+                        cache_trimmed = True
 
                     forward_kwargs = {
                         "input_ids": cur,
@@ -1292,7 +1300,12 @@ class ModelEngine:
                     logits = out.logits[:, -1, :]
                     probs = logits.softmax(-1)
 
-                    if decoding_mode == "speculative" and phase == "decode" and draft_gamma > 1 and step + draft_gamma <= max_new_tokens:
+                    # draft_gamma >= 1: a single draft is still a real
+                    # draft/verify round. Requiring > 1 made the UI's minimum
+                    # (1 draft) silently fall back to plain decoding while the
+                    # run still reported decoding_mode == "speculative" with
+                    # zero proposals (issue #297 review).
+                    if decoding_mode == "speculative" and phase == "decode" and draft_gamma >= 1 and step + draft_gamma <= max_new_tokens:
                         # --- Self-speculative pass: draft + verify in one batch. ---
                         draft_batches += 1
                         drafts_proposed += draft_gamma
@@ -1351,6 +1364,11 @@ class ModelEngine:
                         emit_ids = draft_seq[:k] + [cont]
 
                         for g, cid in enumerate(emit_ids):
+                            # k accepted drafts + 1 continuation can push the
+                            # batch past the requested budget; never emit more
+                            # than max_new_tokens tokens in total.
+                            if step >= max_new_tokens:
+                                break
                             if g == 0:
                                 row_probs, row_logits = probs, logits
                                 row_hs = out.hidden_states
@@ -1386,6 +1404,7 @@ class ModelEngine:
                                 phase, n_positions, cache_len_in,
                                 frame_extra,
                                 None,  # Phase 5.8a: attention skipped for speculative batch
+                                cache_trimmed,
                             )
                             step += 1
                             cache_len_in += 1
@@ -1443,7 +1462,8 @@ class ModelEngine:
                             )
                         yield emit_frame(step, chosen_id, probs, logits, out.hidden_states,
                                          phase, n_positions, cache_len_in, _moe_extra,
-                                         getattr(out, "attentions", None))  # Phase 5.8a
+                                         getattr(out, "attentions", None),  # Phase 5.8a
+                                         cache_trimmed)
                         step += 1
                         if chosen_id in eos_ids:
                             break

@@ -310,6 +310,10 @@ export interface TokenFrame {
   phase?: "prefill" | "decode";
   n_positions?: number; // tokens actually computed this step
   cache_len?: number; // cached positions reused this step
+  // Issue #297 — true ONLY when the backend actually called trim_cache() on
+  // this frame (sliding-window). A cache that is exactly window_size long has
+  // not been trimmed yet, so the UI must never infer trimming from cache_len.
+  cache_trimmed?: boolean;
   // Issue #85 — set on frames produced by the quantized llama.cpp backend.
   source?: "llama.cpp";
   // True when the token was drawn from the real sampling distribution
