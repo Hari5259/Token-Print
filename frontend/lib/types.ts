@@ -314,6 +314,26 @@ export interface TokenFrame {
   // Issue #294 — MoE routing visualization: present on token frames when
   // generating with a Mixture-of-Experts model.
   expert_routing?: MoERouting;
+  // Issue #297 — Speculative decoding annotations. These mirror EXACTLY the
+  // keys the backend adds at backend/app/model.py:1316-1320 on every frame
+  // produced inside the speculative branch (decode mode "speculative"):
+  //
+  //   accepted_drafts: True   – frame came from the speculative branch
+  //   draft_batch:     True   – batch of draft tokens was proposed this step
+  //   n_accepted:      k      – how many drafts the target model accepted
+  //   draft_pos:       g      – 0-based index of THIS token inside the step's
+  //                             emitted batch (0..k).  g < k  => the token was an
+  //                             accepted draft;  g == k => the target model's
+  //                             own continuation token.
+  //   spec_cont:       g >= k – true only for that continuation token.
+  //
+  // They are booleans/ints, NOT arrays: draft_pos is a single position, not a
+  // list of positions. Optional because greedy/sampling frames omit all of them.
+  accepted_drafts?: boolean;
+  draft_batch?: boolean;
+  n_accepted?: number;
+  draft_pos?: number;
+  spec_cont?: boolean;
 }
 
 export type GenStatus = "idle" | "streaming" | "done" | "error";
