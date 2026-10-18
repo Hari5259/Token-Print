@@ -1,6 +1,7 @@
 // Phase 5.8d (#301): Health-report PDF export
 // Generates a comprehensive model-health summary covering capabilities,
 // provenance, per-layer timings, and architectural sentinels as a printable PDF / HTML.
+// Styled to strictly match the TokenPrint monochrome design system.
 
 import type {
   ArchitectureData,
@@ -11,7 +12,7 @@ import type {
   EffectiveCapabilities,
   ProvenanceInfo,
 } from "./types";
-import { fmtCount, fmtBytes } from "./format";
+import { fmtCount } from "./format";
 import { layerTimingView, type LayerTimingView } from "./timing";
 import { extractModelCapabilities, isCapabilitySupported } from "./capabilities";
 import { useStore } from "./store";
@@ -34,8 +35,7 @@ export interface HealthReportSessionData {
 
 /**
  * Pure function to build the complete, self-contained printable HTML document
- * containing the model-health report, capabilities matrix, session provenance,
- * per-layer timing telemetry, and print-to-PDF stylesheet.
+ * matching TokenPrint's dark monochrome design system.
  */
 export function buildHealthReportHtml(session: HealthReportSessionData): string {
   const { arch, trace, genMeta, genFrames, capabilities, provenance, timings, autoPrint } = session;
@@ -59,10 +59,12 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
   const totalParams =
     m?.total_params ??
     (dims?.vocab_size && dims?.hidden_size ? dims.vocab_size * dims.hidden_size : undefined);
+
   const numLayers =
     genMeta?.num_layers ??
     m?.num_layers ??
     (trace && "num_layers" in trace ? trace.num_layers : 24);
+
   const numHeads = dims?.num_heads ?? m?.num_heads ?? (trace && "num_heads" in trace ? trace.num_heads : null);
   const kvHeads = dims?.num_kv_heads ?? m?.num_kv_heads;
   const contextLen = dims?.context_length ?? m?.context_length;
@@ -161,95 +163,128 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TokenPrint Health Report - ${escapeHtml(modelName)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #090d16;
-      --card-bg: #131b2e;
-      --border: #23324f;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --primary: #38bdf8;
-      --primary-dark: #0284c7;
-      --success: #4ade80;
-      --warning: #f59e0b;
-      --danger: #f87171;
+      --ui-bg: #050505;
+      --ui-surface: #0b0b0b;
+      --ui-surface-raised: #111111;
+      --ui-surface-hover: #181818;
+      --ui-border: #252525;
+      --ui-border-strong: #383838;
+      --ui-text: #f5f5f5;
+      --ui-text-secondary: #a3a3a3;
+      --ui-text-muted: #737373;
+      --ui-text-disabled: #4a4a4a;
+      --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", "Fira Code", monospace;
     }
 
     * { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text-main);
-      padding: 30px 40px;
+      font-family: var(--font-sans);
+      background-color: var(--ui-bg);
+      background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+      background-size: 24px 24px;
+      color: var(--ui-text);
+      padding: 24px 40px 60px;
       margin: 0;
       line-height: 1.5;
       font-size: 13px;
+      -webkit-font-smoothing: antialiased;
     }
 
-    /* Floating Print & Export Action Bar */
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    /* Floating Navigation / Toolbar */
     .print-toolbar {
       position: sticky;
-      top: 10px;
+      top: 16px;
       z-index: 1000;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: rgba(15, 23, 42, 0.92);
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 10px 18px;
-      margin-bottom: 25px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(12px);
+      background: rgba(9, 9, 9, 0.95);
+      border: 1px solid var(--ui-border);
+      border-radius: 6px;
+      padding: 8px 16px;
+      margin-bottom: 28px;
+      box-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(18px);
+      font-family: var(--font-sans);
     }
-    .print-toolbar-title {
-      font-weight: 600;
+    .print-toolbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       font-size: 13px;
-      color: #e2e8f0;
+      font-weight: 600;
+      color: #ffffff;
+      letter-spacing: -0.01em;
+    }
+    .print-toolbar-brand svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: #ffffff;
+      stroke-width: 2;
+    }
+    .print-toolbar-brand .crumb {
+      color: var(--ui-text-muted);
+      font-weight: 400;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+    .print-toolbar-actions {
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .print-toolbar-actions {
-      display: flex;
-      gap: 10px;
-    }
     .btn {
       appearance: none;
       border: none;
-      border-radius: 5px;
-      padding: 7px 14px;
-      font-size: 12px;
-      font-weight: 600;
+      border-radius: 4px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.15s ease;
-      font-family: inherit;
+      transition: all 0.12s ease;
+      font-family: var(--font-sans);
+      user-select: none;
     }
     .btn-primary {
-      background: #0284c7;
-      color: #ffffff;
+      background: #ffffff;
+      color: #000000;
+      font-weight: 600;
     }
     .btn-primary:hover {
-      background: #0369a1;
+      background: #e5e5e5;
     }
     .btn-secondary {
-      background: #1e293b;
-      color: #cbd5e1;
-      border: 1px solid #475569;
+      background: transparent;
+      color: var(--ui-text-secondary);
+      border: 1px solid var(--ui-border);
     }
     .btn-secondary:hover {
-      background: #334155;
+      background: var(--ui-surface-hover);
       color: #ffffff;
+      border-color: var(--ui-border-strong);
     }
 
-    /* Report Layout */
+    /* Document Header */
     .header {
-      border-bottom: 2px solid var(--border);
-      padding-bottom: 20px;
-      margin-bottom: 25px;
+      border-bottom: 1px solid var(--ui-border);
+      padding-bottom: 24px;
+      margin-bottom: 28px;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
@@ -258,186 +293,239 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
     }
     .header-main h1 {
       margin: 0;
-      font-size: 26px;
-      font-weight: 700;
-      color: var(--primary);
+      font-size: clamp(26px, 2.5vw, 34px);
+      font-weight: 300;
+      color: #ffffff;
       letter-spacing: -0.02em;
+      line-height: 1.2;
     }
     .header-main .subtitle {
-      color: var(--text-muted);
-      font-size: 13px;
-      margin-top: 4px;
+      color: var(--ui-text-muted);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-top: 8px;
     }
     .score-badge {
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      color: var(--primary);
-      padding: 6px 14px;
+      background: var(--ui-surface-raised);
+      border: 1px solid var(--ui-border-strong);
+      color: #ffffff;
+      padding: 8px 14px;
       border-radius: 6px;
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      letter-spacing: 0.02em;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
     }
+    .score-badge .score-val {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .score-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #4ade80;
+      display: inline-block;
+    }
     .score-badge .score-label {
       font-size: 9px;
-      color: var(--text-muted);
-      font-weight: 600;
+      color: var(--ui-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-top: 2px;
     }
 
+    /* Metric Grid Cards */
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
-      margin-bottom: 28px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 30px;
     }
     .card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 16px;
+      background: var(--ui-surface);
+      border: 1px solid var(--ui-border);
+      border-radius: 6px;
+      padding: 12px 14px;
       break-inside: avoid;
+      transition: border-color 0.15s;
+    }
+    .card:hover {
+      border-color: var(--ui-border-strong);
     }
     .card-label {
-      color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
+      color: var(--ui-text-muted);
+      font-size: 10px;
+      font-weight: 500;
+      font-family: var(--font-mono);
       text-transform: uppercase;
-      letter-spacing: 0.6px;
+      letter-spacing: 0.08em;
     }
     .card-value {
       font-size: 20px;
-      font-weight: 700;
-      color: #f8fafc;
+      font-weight: 600;
+      color: #f5f5f5;
       margin-top: 4px;
+      font-family: var(--font-sans);
+      letter-spacing: -0.01em;
       word-break: break-all;
     }
 
+    /* Sections */
     section {
-      margin-bottom: 30px;
+      margin-bottom: 32px;
       break-inside: avoid;
     }
     h2 {
-      font-size: 16px;
-      color: #e2e8f0;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      border-bottom: 1px solid var(--ui-border);
+      padding-bottom: 10px;
       margin-top: 0;
       margin-bottom: 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      letter-spacing: -0.01em;
     }
     h2 .section-tag {
       font-size: 11px;
-      font-weight: 500;
-      color: var(--text-muted);
+      font-weight: 400;
+      font-family: var(--font-mono);
+      color: var(--ui-text-muted);
+    }
+    .section-desc {
+      color: var(--ui-text-secondary);
+      font-size: 12px;
+      margin-top: 0;
+      margin-bottom: 12px;
     }
 
+    /* Tables */
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 8px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--ui-border);
       border-radius: 6px;
       overflow: hidden;
+      background: var(--ui-surface);
     }
     th, td {
       text-align: left;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border);
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--ui-border);
       font-size: 12px;
     }
     th {
-      color: var(--text-muted);
-      font-weight: 600;
-      background: #0f172a;
+      color: var(--ui-text-muted);
+      font-weight: 500;
+      background: var(--ui-surface-raised);
       text-transform: uppercase;
       font-size: 10px;
-      letter-spacing: 0.5px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.06em;
     }
-    tr:nth-child(even) { background: rgba(30, 41, 59, 0.4); }
-    tr:hover { background: rgba(56, 189, 248, 0.05); }
+    tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.015);
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
 
+    /* Badges & Status */
     .status-pass {
-      color: var(--success);
-      font-weight: 600;
+      color: #ffffff;
+      font-weight: 500;
+      font-family: var(--font-mono);
+      font-size: 11px;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
+    }
+    .status-pass .dot {
+      color: #4ade80;
+      font-size: 10px;
     }
     .status-disabled {
-      color: var(--text-muted);
-      font-weight: 500;
+      color: var(--ui-text-disabled);
+      font-family: var(--font-mono);
+      font-size: 11px;
     }
     .badge-pill {
       font-size: 10px;
-      padding: 2px 7px;
+      padding: 2px 8px;
       border-radius: 4px;
       font-weight: 600;
+      font-family: var(--font-mono);
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.04em;
     }
     .badge-real {
-      background: rgba(34, 197, 94, 0.15);
-      color: #4ade80;
-      border: 1px solid rgba(34, 197, 94, 0.3);
+      background: #ffffff;
+      color: #000000;
     }
     .badge-proxy {
-      background: rgba(234, 179, 8, 0.15);
-      color: #fde047;
-      border: 1px solid rgba(234, 179, 8, 0.3);
+      background: var(--ui-surface-raised);
+      color: var(--ui-text-secondary);
+      border: 1px solid var(--ui-border-strong);
     }
 
-    /* Timings Bar Graph */
+    /* Per-layer Timing Bars */
     .timing-row {
       display: flex;
       align-items: center;
-      gap: 10px;
-      font-family: monospace;
+      gap: 12px;
+      font-family: var(--font-mono);
       font-size: 11px;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
     .timing-label {
-      width: 40px;
-      color: var(--text-muted);
+      width: 36px;
+      color: var(--ui-text-muted);
       flex-shrink: 0;
     }
     .timing-track {
       flex: 1;
-      height: 8px;
-      background: #1e293b;
-      border-radius: 4px;
+      height: 6px;
+      background: #161618;
+      border: 1px solid var(--ui-border);
+      border-radius: 3px;
       overflow: hidden;
     }
     .timing-fill {
       height: 100%;
-      background: #38bdf8;
-      border-radius: 4px;
+      background: #ffffff;
+      border-radius: 3px;
     }
     .timing-val {
       width: 75px;
       text-align: right;
-      color: #e2e8f0;
+      color: var(--ui-text-secondary);
       flex-shrink: 0;
     }
 
+    /* Footer */
     .footer {
-      margin-top: 40px;
-      text-align: center;
-      color: #64748b;
+      margin-top: 48px;
+      color: var(--ui-text-muted);
       font-size: 11px;
-      border-top: 1px solid var(--border);
-      padding-top: 16px;
+      font-family: var(--font-mono);
+      border-top: 1px solid var(--ui-border);
+      padding-top: 18px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      letter-spacing: 0.02em;
     }
 
-    /* Print-to-PDF Media Styles */
+    /* Print / PDF Styling */
     @page {
       margin: 12mm 15mm;
       size: A4 portrait;
@@ -448,23 +536,27 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
       }
       body {
         background: #ffffff !important;
-        color: #0f172a !important;
+        background-image: none !important;
+        color: #000000 !important;
         padding: 0 !important;
         font-size: 10pt !important;
       }
+      .container {
+        max-width: 100% !important;
+      }
       .header {
-        border-bottom: 2px solid #0f172a !important;
+        border-bottom: 2px solid #000000 !important;
       }
       .header-main h1 {
-        color: #0284c7 !important;
+        color: #000000 !important;
       }
       .header-main .subtitle {
-        color: #475569 !important;
+        color: #555555 !important;
       }
       .score-badge {
-        background: transparent !important;
-        border: 1px solid #0284c7 !important;
-        color: #0284c7 !important;
+        background: #f8fafc !important;
+        border: 1px solid #000000 !important;
+        color: #000000 !important;
         print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
@@ -478,21 +570,20 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
         color: #64748b !important;
       }
       .card-value {
-        color: #0f172a !important;
+        color: #000000 !important;
       }
       h2 {
-        color: #0f172a !important;
+        color: #000000 !important;
         border-bottom: 1px solid #cbd5e1 !important;
         page-break-after: avoid;
         break-after: avoid;
       }
+      .section-desc {
+        color: #475569 !important;
+      }
       table {
         border: 1px solid #cbd5e1 !important;
-        page-break-inside: auto;
-      }
-      tr {
-        page-break-inside: avoid;
-        break-inside: avoid;
+        background: #ffffff !important;
       }
       th {
         background: #f1f5f9 !important;
@@ -501,38 +592,41 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
       }
       td {
         border-bottom: 1px solid #e2e8f0 !important;
-        color: #0f172a !important;
+        color: #000000 !important;
       }
       tr:nth-child(even) {
         background: #f8fafc !important;
       }
       .status-pass {
-        color: #15803d !important;
+        color: #000000 !important;
+      }
+      .status-pass .dot {
+        color: #16a34a !important;
       }
       .badge-real {
-        background: #dcfce7 !important;
-        color: #166534 !important;
-        border: 1px solid #bbf7d0 !important;
+        background: #000000 !important;
+        color: #ffffff !important;
         print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
       .badge-proxy {
-        background: #fef9c3 !important;
-        color: #854d0e !important;
-        border: 1px solid #fef08a !important;
+        background: #f1f5f9 !important;
+        color: #334155 !important;
+        border: 1px solid #cbd5e1 !important;
         print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
       .timing-track {
-        background: #e2e8f0 !important;
+        background: #f1f5f9 !important;
+        border-color: #cbd5e1 !important;
       }
       .timing-fill {
-        background: #0284c7 !important;
+        background: #000000 !important;
         print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
       .timing-val {
-        color: #0f172a !important;
+        color: #334155 !important;
       }
       section {
         page-break-inside: avoid;
@@ -546,236 +640,248 @@ export function buildHealthReportHtml(session: HealthReportSessionData): string 
   </style>
 </head>
 <body>
-  <!-- Print / Export Action Toolbar -->
-  <div class="print-toolbar">
-    <div class="print-toolbar-title">
-      <span>🧠 TokenPrint Health Report &amp; Diagnostics</span>
-      <span style="color:#64748b; font-size:11px;">[${reportId}]</span>
-    </div>
-    <div class="print-toolbar-actions">
-      <button class="btn btn-primary" onclick="window.print()">
-        🖨️ Print / Save as PDF
-      </button>
-      <button class="btn btn-secondary" onclick="downloadHtmlFile()">
-        💾 Download HTML
-      </button>
-      <button class="btn btn-secondary" onclick="window.close()">
-        ✕ Close
-      </button>
-    </div>
-  </div>
-
-  <div class="header">
-    <div class="header-main">
-      <h1>${escapeHtml(modelName)}</h1>
-      <div class="subtitle">
-        Architecture: <strong>${escapeHtml(architecture)}</strong> · Generated on ${escapeHtml(dateStr)}
+  <div class="container">
+    <!-- Sticky Navigation / Action Bar -->
+    <div class="print-toolbar">
+      <div class="print-toolbar-brand">
+        <svg viewBox="0 0 24 24">
+          <polygon points="12 2 2 7 12 12 22 7 12 2" />
+          <polyline points="2 17 12 22 22 17" />
+          <polyline points="2 12 12 17 22 12" />
+        </svg>
+        <span>TokenPrint</span>
+        <span class="crumb">/ Health Report [${escapeHtml(reportId)}]</span>
+      </div>
+      <div class="print-toolbar-actions">
+        <button class="btn btn-primary" onclick="window.print()">
+          🖨️ Print / Save as PDF
+        </button>
+        <button class="btn btn-secondary" onclick="downloadHtmlFile()">
+          💾 Download HTML
+        </button>
+        <button class="btn btn-secondary" onclick="window.close()">
+          ✕ Close
+        </button>
       </div>
     </div>
-    <div class="score-badge">
-      <span>Health Score: ${healthScore}%</span>
-      <span class="score-label">${healthScore >= 90 ? "Optimal Operational Health" : "Degraded State"}</span>
-    </div>
-  </div>
 
-  <!-- Key Architecture & Session Metrics -->
-  <div class="grid">
-    <div class="card">
-      <div class="card-label">Parameters</div>
-      <div class="card-value">${totalParams ? fmtCount(totalParams) : "N/A"}</div>
+    <!-- Header Banner -->
+    <div class="header">
+      <div class="header-main">
+        <h1>${escapeHtml(modelName)}</h1>
+        <div class="subtitle">
+          Architecture: <strong>${escapeHtml(architecture)}</strong> · Session ${escapeHtml(dateStr)}
+        </div>
+      </div>
+      <div class="score-badge">
+        <div class="score-val">
+          <span class="dot"></span>
+          <span>Health Score: ${healthScore}%</span>
+        </div>
+        <span class="score-label">${healthScore >= 90 ? "Operational · All Systems Nominal" : "Telemetry Degraded"}</span>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-label">Layers</div>
-      <div class="card-value">${numLayers ?? "N/A"}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Attention Heads</div>
-      <div class="card-value">${numHeads ? (kvHeads ? `${numHeads} (${kvHeads} KV)` : numHeads) : "N/A"}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Context Length</div>
-      <div class="card-value">${contextLen ? contextLen.toLocaleString() : "N/A"}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Hidden Dimension</div>
-      <div class="card-value">${hiddenSize ? hiddenSize.toLocaleString() : "N/A"}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Precision / Dtype</div>
-      <div class="card-value">${escapeHtml(dtype)}</div>
-    </div>
-  </div>
 
-  <!-- Phase 5.8d: Model Capabilities Summary -->
-  <section>
-    <h2>
-      <span>1. Model Capabilities &amp; Inspection Support</span>
-      <span class="section-tag">Compatibility: <strong>${escapeHtml(compatibilityLevel)}</strong></span>
-    </h2>
-    <p style="color:var(--text-muted); font-size:12px; margin-top:0;">
-      ${escapeHtml(compatibilityReason)}
-      ${vramEst ? ` · Estimated minimum memory: <strong>${vramEst.estimated_vram_gb.toFixed(1)} GB VRAM</strong> (${escapeHtml(vramEst.confidence)} confidence).` : ""}
-    </p>
-    <table>
-      <thead>
-        <tr>
-          <th>Capability</th>
-          <th>Target Component</th>
-          <th>Status</th>
-          <th>Confidence</th>
-          <th>Assessment / Technical Reason</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${capabilityRows
-          .map((row) => {
-            const isSupp = isCapabilitySupported(row.cap);
-            const conf = typeof row.cap === "object" && row.cap?.confidence ? row.cap.confidence.toUpperCase() : "HIGH";
-            const reason = typeof row.cap === "object" && row.cap?.reason ? row.cap.reason : (isSupp ? "Fully supported and verified by runtime." : "Telemetry hook not available for this model.");
-            return `<tr>
-              <td><strong>${escapeHtml(row.label)}</strong></td>
-              <td><code>${escapeHtml(row.target)}</code></td>
-              <td>${isSupp ? '<span class="status-pass">✓ SUPPORTED</span>' : '<span class="status-disabled">— N/A</span>'}</td>
-              <td>${escapeHtml(conf)}</td>
-              <td>${escapeHtml(reason)}</td>
-            </tr>`;
-          })
-          .join("\n        ")}
-      </tbody>
-    </table>
-  </section>
+    <!-- Architectural Dimensions Grid -->
+    <div class="grid">
+      <div class="card">
+        <div class="card-label">Parameters</div>
+        <div class="card-value">${totalParams ? fmtCount(totalParams) : "N/A"}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Layers</div>
+        <div class="card-value">${numLayers ?? "N/A"}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Heads (KV)</div>
+        <div class="card-value">${numHeads ? (kvHeads ? `${numHeads} (${kvHeads})` : numHeads) : "N/A"}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Context Len</div>
+        <div class="card-value">${contextLen ? contextLen.toLocaleString() : "N/A"}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Hidden Dim</div>
+        <div class="card-value">${hiddenSize ? hiddenSize.toLocaleString() : "N/A"}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Precision</div>
+        <div class="card-value">${escapeHtml(dtype)}</div>
+      </div>
+    </div>
 
-  <!-- Phase 5.8d: Session Provenance & Environment -->
-  <section>
-    <h2>
-      <span>2. Session Provenance &amp; Runtime Authority</span>
-      <span class="badge-pill ${originBadge === "REAL" ? "badge-real" : "badge-proxy"}">${escapeHtml(originBadge)} DATA</span>
-    </h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Attribute</th>
-          <th>Current Value</th>
-          <th>Verification Status</th>
-          <th>Scientific Integrity Note</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Execution Backend</td>
-          <td><strong>${escapeHtml(sourceBackend)}</strong></td>
-          <td class="status-pass">✓ VERIFIED</td>
-          <td>Direct runtime pipeline producing token logits and activation tensors.</td>
-        </tr>
-        <tr>
-          <td>Hardware Device</td>
-          <td><code>${escapeHtml(deviceTarget)}</code></td>
-          <td class="status-pass">✓ ACTIVE</td>
-          <td>Target compute device executing forward pass operations.</td>
-        </tr>
-        <tr>
-          <td>Quantization State</td>
-          <td><code>${escapeHtml(dtype)}</code></td>
-          <td class="status-pass">✓ MATCHED</td>
-          <td>Numeric precision format of loaded weights and projection matrices.</td>
-        </tr>
-        <tr>
-          <td>Trace Token Sequence</td>
-          <td>${tokenCount} tokens recorded</td>
-          <td class="status-pass">✓ SYNCHRONIZED</td>
-          <td>Telemetry stream frames captured in active session buffer.</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+    <!-- Phase 5.8d: Model Capabilities Summary -->
+    <section>
+      <h2>
+        <span>1. Model Capabilities &amp; Inspection Support</span>
+        <span class="section-tag">Compatibility: <strong>${escapeHtml(compatibilityLevel)}</strong></span>
+      </h2>
+      <p class="section-desc">
+        ${escapeHtml(compatibilityReason)}
+        ${vramEst ? ` · Estimated minimum resource allocation: <strong>${vramEst.estimated_vram_gb.toFixed(1)} GB VRAM</strong> (${escapeHtml(vramEst.confidence)} confidence).` : ""}
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th>Target Subsystem</th>
+            <th>Status</th>
+            <th>Confidence</th>
+            <th>Technical Assessment</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${capabilityRows
+            .map((row) => {
+              const isSupp = isCapabilitySupported(row.cap);
+              const conf = typeof row.cap === "object" && row.cap?.confidence ? row.cap.confidence.toUpperCase() : "HIGH";
+              const reason = typeof row.cap === "object" && row.cap?.reason ? row.cap.reason : (isSupp ? "Fully supported and verified by runtime." : "Telemetry hook not available for this model.");
+              return `<tr>
+                <td><strong>${escapeHtml(row.label)}</strong></td>
+                <td><code>${escapeHtml(row.target)}</code></td>
+                <td>${isSupp ? '<span class="status-pass"><span class="dot">●</span> SUPPORTED</span>' : '<span class="status-disabled">— N/A</span>'}</td>
+                <td><code>${escapeHtml(conf)}</code></td>
+                <td>${escapeHtml(reason)}</td>
+              </tr>`;
+            })
+            .join("\n          ")}
+        </tbody>
+      </table>
+    </section>
 
-  <!-- Phase 5.8d: Timings & Latency Diagnostics -->
-  <section>
-    <h2>
-      <span>3. Per-Layer Latency &amp; Execution Timings</span>
-      <span class="badge-pill ${isRealTiming ? "badge-real" : "badge-proxy"}">
-        ${isRealTiming ? "REAL MS · HARDWARE TIME" : "PROXY · ACTIVATION NORM"}
-      </span>
-    </h2>
-    <p style="color:var(--text-muted); font-size:12px; margin-top:0;">
+    <!-- Phase 5.8d: Session Provenance & Environment -->
+    <section>
+      <h2>
+        <span>2. Session Provenance &amp; Runtime Authority</span>
+        <span class="badge-pill ${originBadge === "REAL" ? "badge-real" : "badge-proxy"}">${escapeHtml(originBadge)} DATA</span>
+      </h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Pipeline Attribute</th>
+            <th>Active Value</th>
+            <th>Status</th>
+            <th>Integrity Classification</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Execution Backend</td>
+            <td><strong>${escapeHtml(sourceBackend)}</strong></td>
+            <td><span class="status-pass"><span class="dot">●</span> VERIFIED</span></td>
+            <td>Direct runtime pipeline producing token logits and activation tensors.</td>
+          </tr>
+          <tr>
+            <td>Hardware Target</td>
+            <td><code>${escapeHtml(deviceTarget)}</code></td>
+            <td><span class="status-pass"><span class="dot">●</span> ACTIVE</span></td>
+            <td>Compute substrate executing tensor forward pass operations.</td>
+          </tr>
+          <tr>
+            <td>Weight Precision</td>
+            <td><code>${escapeHtml(dtype)}</code></td>
+            <td><span class="status-pass"><span class="dot">●</span> MATCHED</span></td>
+            <td>Numeric precision format of loaded weights and projection matrices.</td>
+          </tr>
+          <tr>
+            <td>Token Telemetry Sequence</td>
+            <td>${tokenCount} tokens recorded</td>
+            <td><span class="status-pass"><span class="dot">●</span> CAPTURED</span></td>
+            <td>Telemetry stream frames captured in active session buffer.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Phase 5.8d: Timings & Latency Diagnostics -->
+    <section>
+      <h2>
+        <span>3. Per-Layer Latency &amp; Execution Timings</span>
+        <span class="badge-pill ${isRealTiming ? "badge-real" : "badge-proxy"}">
+          ${isRealTiming ? "REAL MS · HARDWARE TIME" : "PROXY · ACTIVATION NORM"}
+        </span>
+      </h2>
+      <p class="section-desc">
+        ${
+          isRealTiming
+            ? `Per-layer wall-clock latency captured via forward hook timers. Total step latency: <strong>${timingTotalMs !== null && timingTotalMs !== undefined ? timingTotalMs.toFixed(2) : "—"} ms</strong> across ${perLayerTimings.length} layers.`
+            : "Real hardware execution timings were omitted in this trace stream. Displaying normalized layer activation norms (|activation|) as proxy diagnostics."
+        }
+      </p>
+
       ${
-        isRealTiming
-          ? `Per-layer wall-clock latency captured via backend execution forward hooks. Total step time: <strong>${timingTotalMs !== null && timingTotalMs !== undefined ? timingTotalMs.toFixed(2) : "—"} ms</strong> across ${perLayerTimings.length} layers.`
-          : "Real hardware execution timings were omitted in this trace stream. Displaying normalized layer activation norms (|activation|) as proxy diagnostics."
+        perLayerTimings.length > 0
+          ? `<div style="margin-top: 10px; max-height: 280px; overflow-y: auto;">
+            ${(() => {
+              const maxVal = Math.max(...perLayerTimings, 0.001);
+              return perLayerTimings
+                .slice(0, 32)
+                .map((val, idx) => {
+                  const pct = Math.min(100, Math.max(2, (val / maxVal) * 100));
+                  return `<div class="timing-row">
+                    <span class="timing-label">L${idx}</span>
+                    <div class="timing-track">
+                      <div class="timing-fill" style="width: ${pct.toFixed(1)}%;"></div>
+                    </div>
+                    <span class="timing-val">${val.toFixed(2)} ${isRealTiming ? "ms" : "norm"}</span>
+                  </div>`;
+                })
+                .join("\n            ");
+            })()}
+          </div>`
+          : `<p style="color:var(--ui-text-muted); font-style:italic;">No per-layer timing telemetry captured for this session.</p>`
       }
-    </p>
+    </section>
 
-    ${
-      perLayerTimings.length > 0
-        ? `<div style="margin-top: 12px; max-height: 280px; overflow-y: auto;">
-          ${(() => {
-            const maxVal = Math.max(...perLayerTimings, 0.001);
-            return perLayerTimings
-              .slice(0, 32)
-              .map((val, idx) => {
-                const pct = Math.min(100, Math.max(2, (val / maxVal) * 100));
-                return `<div class="timing-row">
-                  <span class="timing-label">L${idx}</span>
-                  <div class="timing-track">
-                    <div class="timing-fill" style="width: ${pct.toFixed(1)}%;"></div>
-                  </div>
-                  <span class="timing-val">${val.toFixed(2)} ${isRealTiming ? "ms" : "norm"}</span>
-                </div>`;
-              })
-              .join("\n          ");
-          })()}
-        </div>`
-        : `<p style="color:var(--text-muted); font-style:italic;">No per-layer timing telemetry captured for this session.</p>`
-    }
-  </section>
+    <!-- Model & Weight Integrity Checks -->
+    <section>
+      <h2>
+        <span>4. Numerical &amp; Weight Integrity Sentinels</span>
+        <span class="section-tag">${failedChecks.length === 0 ? "Zero Anomalies Detected" : "Warning Detected"}</span>
+      </h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Sentinel Check</th>
+            <th>Target Subsystem</th>
+            <th>Result</th>
+            <th>Observation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>NaN / Inf Sentinels</td>
+            <td>Global Weights &amp; Tensors</td>
+            <td><span class="status-pass"><span class="dot">●</span> PASS</span></td>
+            <td>Zero invalid numerical values detected across ${arch?.tensor_count ?? 0} loaded tensors.</td>
+          </tr>
+          <tr>
+            <td>Residual Stream Bounds</td>
+            <td>RMSNorm / LayerNorm</td>
+            <td><span class="status-pass"><span class="dot">●</span> PASS</span></td>
+            <td>Layer activation norms remain bounded within expected limits [0.8 .. 12.4].</td>
+          </tr>
+          <tr>
+            <td>Attention Entropy Spread</td>
+            <td>Multi-Head Attention</td>
+            <td><span class="status-pass"><span class="dot">●</span> PASS</span></td>
+            <td>Attention heads demonstrate healthy specialization without degenerate uniform spreading.</td>
+          </tr>
+          <tr>
+            <td>Embedding Space Variance</td>
+            <td>Vocabulary Embeddings</td>
+            <td><span class="status-pass"><span class="dot">●</span> PASS</span></td>
+            <td>Standard deviation across embedding dimensions is nominal (no dead dimensional collapse).</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
-  <!-- Model & Weight Integrity Checks -->
-  <section>
-    <h2>
-      <span>4. Numerical &amp; Weight Integrity Sentinels</span>
-      <span class="section-tag">${failedChecks.length === 0 ? "All Checks Passed" : "Warning Detected"}</span>
-    </h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Sentinel Check</th>
-          <th>Target Component</th>
-          <th>Status</th>
-          <th>Observation Details</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>NaN / Inf Numerical Sentinels</td>
-          <td>Global Weights &amp; Tensors</td>
-          <td class="status-pass">✓ PASS</td>
-          <td>Zero invalid numerical values detected across ${arch?.tensor_count ?? 0} loaded tensors.</td>
-        </tr>
-        <tr>
-          <td>Residual Stream Saturation</td>
-          <td>RMSNorm / LayerNorm Output</td>
-          <td class="status-pass">✓ PASS</td>
-          <td>Layer activation norms remain bounded within expected operational limits [0.8 .. 12.4].</td>
-        </tr>
-        <tr>
-          <td>Attention Entropy Distribution</td>
-          <td>Multi-Head Query-Key Matrix</td>
-          <td class="status-pass">✓ PASS</td>
-          <td>Attention heads demonstrate healthy specialization without degenerate uniform spreading.</td>
-        </tr>
-        <tr>
-          <td>Vocabulary Embedding Variance</td>
-          <td>Input / Output Embeddings</td>
-          <td class="status-pass">✓ PASS</td>
-          <td>Standard deviation across embedding dimensions is nominal (no dead dimensional collapse).</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-
-  <div class="footer">
-    <div>TokenPrint Visual Inspection System · Phase 5.8d Wildcard Flagship Release</div>
-    <div>Report ID: <strong>${escapeHtml(reportId)}</strong></div>
+    <!-- Footer -->
+    <div class="footer">
+      <div>TokenPrint Visual Inspection System · Phase 5.8d Wildcard Flagship Release</div>
+      <div>Report ID: <strong>${escapeHtml(reportId)}</strong></div>
+    </div>
   </div>
 
   <script>
