@@ -3,6 +3,12 @@
 import type { CSSProperties } from "react";
 import { useStore } from "@/lib/store";
 import { activeLayerOf, phaseInfo } from "@/lib/playback";
+import {
+  attendedPositions,
+  findNeedleSpan,
+  needleResidency,
+  windowState,
+} from "@/lib/genReadouts";
 import type { TopKCandidate } from "@/lib/types";
 import { Button, TOKENS } from "./primitives";
 
@@ -168,6 +174,17 @@ export default function GenerationPanel() {
   const cacheLen = frame?.cache_len ?? phase?.cacheLen ?? null;
   const nPos = frame?.n_positions ?? phase?.positions ?? null;
   const dp = meta?.decoding_params ?? {};
+
+  // Issue #297 — needle probe: locate the [MEMORY] fact inside the tokenized
+  // prompt and (for sliding-window runs) decide honestly whether it is still
+  // inside the window once generation finished. `prompt_len` alone cannot tell
+  // that — the needle may sit anywhere in the prompt.
+  const needleText = genDone?.needle_report?.needle ?? dp.needle ?? null;
+  const needleSpan = findNeedleSpan(meta?.prompt_tokens ?? [], needleText);
+  const needleTotal = (meta?.prompt_len ?? 0) + (genDone?.total_steps ?? 0);
+  const needleRes = needleResidency(needleSpan, needleTotal, dp.window_size ?? null);
+  // Sliding-window state straight from the frame's own trim flag.
+  const winState = windowState(cacheLen, dp.window_size ?? null, frame?.cache_trimmed);
   const tokenText = frame?.chosen.text ?? "";
 
   return (
@@ -267,27 +284,27 @@ export default function GenerationPanel() {
         <div style={rowStyle}><span style={keyStyle}>CACHE LEN</span><span style={valStyle}>{cacheLen != null ? cacheLen : NA}</span></div>
         <div style={rowStyle}><span style={keyStyle}>POSITIONS</span><span style={valStyle}>{nPos != null ? nPos : NA}</span></div>
         <div style={rowStyle}><span style={keyStyle}>PROMPT LEN</span><span style={valStyle}>{meta?.prompt_len != null ? meta.prompt_len : NA}</span></div>
-        {/* Sliding-window mode: show the configured window size and whether the
-            cache has been trimmed yet (cache_len < positions). Source: the
-            meta.decoding_params.window_size sent by the backend in the meta
-            frame. cache_len is the real fed-cache length every step. */}
+        {/* Sliding-window mode: the configured window size plus the honest
+            cache state. `winState` comes from windowState() driven by the
+            frame's `cache_trimmed` flag — a merely-full window is NOT trimming
+            (the backend's trim test is strict `>`). */}
         {meta?.decoding === "sliding_window" && dp.window_size != null && (
           <div style={rowStyle}>
             <span style={keyStyle}>WINDOW SIZE</span>
-            <span style={{ ...valStyle, color: cacheLen != null && cacheLen >= dp.window_size ? "#ffd36e" : TOKENS.textSecondary }}>
+            <span style={{ ...valStyle, color: winState === "trimming" ? "#ffd36e" : winState === "full" ? "#ffb347" : TOKENS.textSecondary }}>
               {dp.window_size}
-              {cacheLen != null && cacheLen >= dp.window_size ? " · trimming" : " · growing"}
+              {winState === "trimming" ? " · trimming" : winState === "full" ? " · full" : " · growing"}
             </span>
           </div>
         )}
         <div style={{ ...rowStyle, borderBottom: "none" }}>
           <span style={keyStyle}>CONTEXT</span>
-          {/* CONTEXT = cache_len (total cached positions).
-              cache_len already includes the prompt. On the first decode step it
-              equals prompt_len (prefilled prompt); on subsequent steps it grows
-              by n_positions. For sliding-window runs it caps at window_size once
-              trimming begins. */}
-          <span style={valStyle}>{cacheLen != null ? cacheLen : NA}</span>
+          {/* CONTEXT = positions the model attended over on this frame's
+              forward pass: the KV cache it reused (cache_len) plus the
+              positions computed now (n_positions).
+              prefill → 0 + prompt_len · decode → cache_len + 1 ·
+              sliding-window after a trim → window_size + 1. */}
+          <span style={valStyle}>{attendedPositions(cacheLen, nPos) ?? NA}</span>
         </div>
       </div>
 
@@ -353,11 +370,11 @@ export default function GenerationPanel() {
       )}
 
       {/* NEEDLE RECALL — shown after generation when needle was enabled.
-          needle_report is on the done frame only; no per-token needle field
-          exists. The backend checks whether the needle text appears in the
-          generated response (model.py:1418-1425). The needle is embedded in
-          the prompt, so prompt_len and window_size context shows whether the
-          needle was kept in cache or evicted during sliding-window trimming. */}
+          needle_report lives on the done frame; the needle's POSITION is
+          derived from the real tokenized prompt (meta.prompt_tokens), and its
+          residency compares that span against the sliding window using
+          prompt_len + total_steps (the backend's net KV position count). No
+          eviction is inferred from prompt_len alone. */}
       {genDone?.needle_report && (
         <div style={sectStyle}>
           <SectionTitle title="NEEDLE RECALL" right={genDone.needle_report.recalled ? "✓ recalled" : "✗ missed"} />
@@ -368,18 +385,28 @@ export default function GenerationPanel() {
             </span>
           </div>
           <div style={rowStyle}>
+            <span style={keyStyle}>POSITION</span>
+            <span style={{ ...valStyle, color: needleSpan ? "#55efc4" : TOKENS.textMuted }}>
+              {needleSpan ? `${needleSpan.start}–${needleSpan.end}` : "not located"}
+            </span>
+          </div>
+          <div style={rowStyle}>
             <span style={keyStyle}>PROMPT LENGTH</span>
             <span style={valStyle}>{meta?.prompt_len ?? NA}</span>
           </div>
           {meta?.decoding === "sliding_window" && dp.window_size != null && (
             <div style={rowStyle}>
               <span style={keyStyle}>WINDOW SIZE</span>
-              <span style={{
-                ...valStyle,
-                color: (meta?.prompt_len ?? 0) > dp.window_size ? "#ff6b6b" : "#7fd7c8"
-              }}>
-                {dp.window_size}
-                {(meta?.prompt_len ?? 0) > dp.window_size ? " · needle evicted" : " · needle kept"}
+              <span style={valStyle}>{dp.window_size}</span>
+            </div>
+          )}
+          {meta?.decoding === "sliding_window" && needleRes != null && (
+            <div style={rowStyle}>
+              <span style={keyStyle}>STILL ATTENDED</span>
+              <span style={{ ...valStyle, color: needleRes.evicted ? "#ff6b6b" : "#7fd7c8" }}>
+                {needleRes.evicted
+                  ? `no · window starts at ${needleRes.keptFrom}`
+                  : "yes · inside the window"}
               </span>
             </div>
           )}

@@ -1,6 +1,6 @@
-import itertools
 import types
 import unittest
+from itertools import pairwise
 from unittest.mock import MagicMock
 
 import torch
@@ -120,6 +120,13 @@ class _SyntheticSpecModel(nn.Module):
         x = self.proj(x)
         logits = self.lm_head(x)             # [1, seq, vocab]
 
+        # Deterministic peak on token 0: the next-token distribution is
+        # effectively one-hot, so every sampled draft equals the argmax and
+        # speculative acceptance is predictable (k == draft_gamma). Without a
+        # peaked distribution the multinomial draft draws would be random and
+        # tests could not assert exact emitted-token counts.
+        logits[..., 0] = logits[..., 0] + 50.0
+
         seq = input_ids.shape[1]
         prior = past_key_values[0][0].shape[2] if past_key_values is not None else 0
         total = prior + seq
@@ -139,8 +146,13 @@ class _SyntheticSpecModel(nn.Module):
         )
 
 
-def _make_spec_service(model: nn.Module) -> ModelEngine:
-    """Build a minimal ModelEngine instance wired to *model* without loading weights."""
+def _make_spec_service(model: nn.Module, prompt_len: int = 5) -> ModelEngine:
+    """Build a minimal ModelEngine instance wired to *model* without loading weights.
+
+    ``prompt_len`` is how many token ids the tokenizer stub reports for every
+    prompt (the sliding-window tests need a prompt at least as long as the
+    clamped window floor of 16, see ``model.py: window_size = max(16, ...)``).
+    """
     import threading
 
     svc = ModelEngine.__new__(ModelEngine)
@@ -157,9 +169,10 @@ def _make_spec_service(model: nn.Module) -> ModelEngine:
     svc._layer_elapsed = {}
     svc._layer_timing_lock = threading.Lock()
 
+    ids = [i % 63 + 1 for i in range(prompt_len)]
     tok = MagicMock()
-    tok.side_effect = lambda prompt, **kw: {"input_ids": torch.tensor([[1, 2, 3, 4, 5]])}
-    tok.encode.return_value = [1, 2, 3, 4, 5]
+    tok.side_effect = lambda prompt, **kw: {"input_ids": torch.tensor([ids])}
+    tok.encode.return_value = list(ids)
     tok.decode.side_effect = lambda ids, **kw: f"t{ids[0] if ids else 0}"
     tok.eos_token_id = 9999
     svc.tokenizer = tok
@@ -196,17 +209,33 @@ class TestCacheLenTracksPositionsDone(unittest.TestCase):
         token_frames = self._collect_token_frames(frames)
         self.assertEqual(len(token_frames), n_tokens)
 
-        # First token: prompt is 5 tokens, no cache yet → cache_len == 0
-        # Subsequent: cache_len grows by 1 each step (one token appended per step).
-        for i, f in enumerate(token_frames):
-            # cache_len must be a non-negative integer
+        # Exact expectations (no wiggle room): frame 0 is the prefill pass over
+        # an empty cache → 0; frame s (s >= 1) reports the positions already fed
+        # BEFORE its forward pass, i.e. prompt_len + s - 1. A stale value (for
+        # example logits.shape[1] == top_k/gamma) fails here outright.
+        prompt_len = 5
+        cache_lens = []
+        for f in token_frames:
+            step = f["step"]
+            expected = 0 if step == 0 else prompt_len + step - 1
             self.assertIsInstance(f["cache_len"], int)
-            self.assertGreaterEqual(f["cache_len"], 0)
+            self.assertEqual(
+                f["cache_len"],
+                expected,
+                msg=(f"frame step={step}: cache_len={f['cache_len']} but the fed "
+                     f"cache held {expected} positions"),
+            )
+            cache_lens.append(f["cache_len"])
 
-        # Strictly monotonically non-decreasing
-        cache_lens = [f["cache_len"] for f in token_frames]
-        for a, b in itertools.pairwise(cache_lens):
-            self.assertGreaterEqual(b, a, msg="cache_len must not decrease between steps")
+        # Strictly increasing. (The prefill → decode boundary jumps from 0 to
+        # prompt_len; every later pair advances by exactly one, which the exact
+        # per-frame assertions above already pin down.)
+        for a, b in pairwise(cache_lens):
+            self.assertGreater(b, a, msg="cache_len must never repeat or drop")
+
+        # Greedy runs never touch the sliding-window trim path.
+        for f in token_frames:
+            self.assertFalse(f["cache_trimmed"])
 
     def test_speculative_cache_len_tracks_positions_done(self):
         """Core regression: cache_len must equal the sequential KV-position count.
@@ -216,10 +245,11 @@ class TestCacheLenTracksPositionsDone(unittest.TestCase):
         ``[1, gamma, vocab]``, so that formula yielded ``gamma`` (3 here) on
         every speculative frame instead of the real cache length.
 
-        The prompt stub is 5 tokens, so every legitimate cache_len is either 0
-        (prefill, nothing cached yet) or >= 5. A value of exactly ``gamma`` is
-        therefore never legitimate, which is what makes this a real regression
-        test rather than an assertion about an unrelated number.
+        The prompt stub is 5 tokens, so every frame has an exact expectation:
+        step 0 (prefill) reports 0 cached positions, every later step reports
+        ``prompt_len + step - 1``. Before the fix this formula was violated on
+        every speculative frame because ``logits.shape[1] == gamma`` (3 here)
+        leaked into ``cache_len``.
         """
         model = _SyntheticSpecModel()
         svc = _make_spec_service(model)
@@ -249,17 +279,19 @@ class TestCacheLenTracksPositionsDone(unittest.TestCase):
             "no speculative frames emitted — the regression path was not exercised",
         )
 
-        for i, f in enumerate(token_frames):
+        for f in token_frames:
+            step = f["step"]
             cache_len = f["cache_len"]
+            expected = 0 if step == 0 else prompt_len + step - 1
             self.assertIsInstance(cache_len, int)
-            self.assertGreaterEqual(cache_len, 0)
-            self.assertIn(
-                cache_len == 0 or cache_len >= prompt_len,
-                (True,),
+            self.assertEqual(
+                cache_len,
+                expected,
                 msg=(
-                    f"Frame {i}: cache_len={cache_len} is neither 0 (prefill) nor "
-                    f">= prompt length {prompt_len} — it looks like "
-                    f"logits.shape[1] was used instead of state.positions_done."
+                    f"Frame step={step}: cache_len={cache_len}, expected "
+                    f"{expected} (prompt_len {prompt_len} + step - 1). A value "
+                    f"of exactly {draft_gamma} means logits.shape[1] was used "
+                    "instead of state.positions_done."
                 ),
             )
 
@@ -281,12 +313,129 @@ class TestCacheLenTracksPositionsDone(unittest.TestCase):
         )
         token_frames = self._collect_token_frames(frames)
         cache_lens = [f["cache_len"] for f in token_frames]
-        for idx, (a, b) in enumerate(itertools.pairwise(cache_lens)):
-            self.assertGreaterEqual(
-                b, a,
+        for idx, (a, b) in enumerate(pairwise(cache_lens)):
+            self.assertGreater(
+                b,
+                a,
                 msg=(
-                    f"cache_len decreased from {a} to {b} between frames "
-                    f"{idx} and {idx + 1}. This indicates the positions_done "
-                    "counter was reset mid-generation."
+                    f"cache_len went from {a} to {b} between frames "
+                    f"{idx} and {idx + 1}; it must advance on every frame."
                 ),
             )
+
+    # ------------------------------------------------------------------ #
+    # Issue #297 — decode-mode surface regression tests
+    # ------------------------------------------------------------------ #
+
+    def test_single_draft_gamma_still_runs_speculation(self):
+        """draft_gamma == 1 must take the speculative branch (review fix).
+
+        The UI exposes a minimum of 1 draft. The old ``draft_gamma > 1`` guard
+        silently fell back to plain decoding, so the run reported
+        ``decoding_mode == "speculative"`` with zero proposals, zero accepted
+        frames and an acceptance rate of 0.
+        """
+        model = _SyntheticSpecModel()
+        svc = _make_spec_service(model)
+
+        frames = list(
+            svc.generate_steps(
+                prompt="hello",
+                max_new_tokens=5,
+                top_k=5,
+                use_chat_template=False,
+                include_catalog=False,
+                decoding_mode="speculative",
+                draft_gamma=1,
+            )
+        )
+        token_frames = self._collect_token_frames(frames)
+        done = next(f for f in frames if f.get("type") == "done")
+
+        self.assertTrue(
+            any(f.get("accepted_drafts") for f in token_frames),
+            "draft_gamma=1 produced no speculative frames at all",
+        )
+        self.assertGreater(done["draft_batches"], 0)
+        self.assertEqual(done["drafts_proposed"], done["draft_batches"])
+        self.assertGreater(done["drafts_accepted"], 0)
+        self.assertEqual(
+            done["drafts_rejected"], done["drafts_proposed"] - done["drafts_accepted"]
+        )
+
+    def test_generation_never_exceeds_max_new_tokens(self):
+        """k accepted drafts + 1 continuation must respect the token budget.
+
+        A speculative step can emit up to ``draft_gamma + 1`` tokens while the
+        branch guard only checked ``step + draft_gamma <= max_new_tokens``, so a
+        full batch could push the run one token past the requested budget.
+        """
+        model = _SyntheticSpecModel()
+        svc = _make_spec_service(model)
+
+        max_new_tokens = 4
+        frames = list(
+            svc.generate_steps(
+                prompt="hello",
+                max_new_tokens=max_new_tokens,
+                top_k=5,
+                use_chat_template=False,
+                include_catalog=False,
+                decoding_mode="speculative",
+                draft_gamma=3,
+            )
+        )
+        token_frames = self._collect_token_frames(frames)
+        self.assertEqual(len(token_frames), max_new_tokens)
+        # The run must still have exercised the speculative branch.
+        self.assertTrue(any(f.get("accepted_drafts") for f in token_frames))
+
+    def test_cache_trimmed_only_when_the_window_was_actually_trimmed(self):
+        """``cache_trimmed`` marks real trims; a full window is not a trim.
+
+        window_size == prompt_len makes the cache exactly full on the first
+        decode step (positions_done == window_size, the backend's trim test is
+        strict ``>``), which is precisely the state the UI used to mislabel as
+        "trimming oldest". Later steps do trim and must be flagged.
+        """
+        model = _SyntheticSpecModel()
+        svc = _make_spec_service(model, prompt_len=16)
+
+        prompt_len = 16
+        # generate_steps clamps window_size into [16, 4096], so 16 is the
+        # smallest window that can be exercised end to end.
+        window_size = 16
+        frames = list(
+            svc.generate_steps(
+                prompt="hello",
+                max_new_tokens=6,
+                top_k=5,
+                use_chat_template=False,
+                include_catalog=False,
+                decoding_mode="sliding_window",
+                window_size=window_size,
+            )
+        )
+        token_frames = self._collect_token_frames(frames)
+
+        for f in token_frames:
+            step = f["step"]
+            if step == 0:
+                # Prefill: nothing cached yet, nothing to trim.
+                self.assertEqual(f["cache_len"], 0)
+                self.assertFalse(f["cache_trimmed"])
+            elif step == 1:
+                # Exactly full (prompt_len == window_size) but NOT trimmed.
+                self.assertEqual(f["cache_len"], window_size)
+                self.assertFalse(
+                    f["cache_trimmed"],
+                    "a full cache must not be reported as trimmed",
+                )
+            else:
+                # positions_done > window_size from here on → real trims.
+                self.assertEqual(f["cache_len"], window_size)
+                self.assertTrue(
+                    f["cache_trimmed"],
+                    "frames past the window must report the trim that happened",
+                )
+        self.assertEqual(prompt_len, window_size)
