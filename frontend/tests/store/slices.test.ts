@@ -814,3 +814,95 @@ test("Phase 5.8c: normalizeCursor correctly clamps coordinates and attaches laye
   assert.equal(sanitizeColor(undefined), "#38bdf8");
 });
 
+
+// --- loadArchitecture(modelId) regression tests (refs #275) ---------------- //
+const sampleArch = {
+  source: "model",
+  model: "demo",
+  metadata: {},
+  tensor_count: 0,
+  tensors: [],
+} as any;
+
+async function withFakeFetch(
+  handler: (url: string) => unknown,
+  run: () => Promise<void>,
+): Promise<void> {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown) => handler(String(input))) as unknown as typeof fetch;
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("loadArchitecture(modelId) requests the selected model", async () => {
+  const urls: string[] = [];
+  await withFakeFetch(
+    (url) => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => sampleArch };
+    },
+    async () => {
+      const store = makeStore();
+      await store.getState().loadArchitecture("TinyLlama/TinyLlama-1.1B-Chat-v1.0");
+      assert.equal(urls.length, 1);
+      assert.ok(
+        urls[0].endsWith("/architecture?model_id=TinyLlama%2FTinyLlama-1.1B-Chat-v1.0"),
+        `unexpected url: ${urls[0]}`,
+      );
+      assert.equal(store.getState().arch?.model, "demo");
+      assert.equal(store.getState().archLoading, false);
+      assert.equal(store.getState().archError, null);
+    },
+  );
+});
+
+test("loadArchitecture() without a modelId requests the default model", async () => {
+  const urls: string[] = [];
+  await withFakeFetch(
+    (url) => {
+      urls.push(url);
+      return { ok: true, status: 200, json: async () => sampleArch };
+    },
+    async () => {
+      const store = makeStore();
+      await store.getState().loadArchitecture();
+      assert.equal(urls.length, 1);
+      assert.ok(urls[0].endsWith("/architecture"), `unexpected url: ${urls[0]}`);
+      assert.equal(urls[0].includes("model_id"), false);
+    },
+  );
+});
+
+test("loadArchitecture surfaces a failed request as archError", async () => {
+  await withFakeFetch(
+    () => ({ ok: false, status: 500, json: async () => ({}) }),
+    async () => {
+      const store = makeStore();
+      await store.getState().loadArchitecture("some/model");
+      assert.equal(store.getState().arch, null);
+      assert.equal(store.getState().archLoading, false);
+      assert.equal(store.getState().archError, "Architecture request failed (500)");
+    },
+  );
+});
+
+test("loadArchitecture ignores a stale response after the trace source changes", async () => {
+  let resolveFetch: (value: unknown) => void = () => undefined;
+  await withFakeFetch(
+    () => new Promise((resolve) => { resolveFetch = resolve; }),
+    async () => {
+      const store = makeStore();
+      store.setState({ traceSource: "live" as any });
+      const pending = store.getState().loadArchitecture("some/model");
+      // A trace file is loaded while the request is still in flight.
+      store.setState({ traceSource: "file" as any });
+      resolveFetch({ ok: true, status: 200, json: async () => sampleArch });
+      await pending;
+      assert.equal(store.getState().arch, null);
+      assert.equal(store.getState().archLoading, false);
+    },
+  );
+});
